@@ -1,3 +1,15 @@
+# Telegram Bot
+aiogram
+aiohttp==3.11.11
+aiofiles==24.1.0
+
+# Downloaders
+yt-dlp==2024.12.13
+
 # Core
 python-dotenv==1.0.1
 requests==2.32.3
+validators==0.34.0
+
+# Media Processing (опционально)
+Pillow==11.0.0
