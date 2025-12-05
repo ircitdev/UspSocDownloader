@@ -1,7 +1,7 @@
 """
 Handler для обработки сообщений с URL
 """
-from aiogram import Router, types
+from aiogram import Router, types, F
 from aiogram.filters import Command
 from src.utils.logger import get_logger
 from src.processors.url_processor import URLProcessor, Platform
@@ -16,7 +16,7 @@ router = Router()
 url_processor = URLProcessor()
 
 
-@router.message()
+@router.message(F.text.regexp(r'https?://'))
 async def handle_url_message(message: types.Message):
     """Обрабатывает сообщения с URL"""
     try:

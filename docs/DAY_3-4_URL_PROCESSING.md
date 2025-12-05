@@ -220,12 +220,10 @@ if result.is_valid:
 else:
     print(f"Ошибка: {result.error_message}")
 ```
-
     print(f"ID: {result.post_id}")
     print(f"Тип: {result.content_type}")
-else:Gt
+else:
     print(f"Ошибка: {result.error_message}")
-
 ```
 
 ---
