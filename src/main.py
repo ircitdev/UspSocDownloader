@@ -4,7 +4,7 @@ import logging
 from src.utils.logger import get_logger
 from src.bot import create_bot, close_bot
 from src.config import config
-from src.handlers import start, help, url_handler, download_handler
+from src.handlers import start, help, url_handler
 
 logger = get_logger(__name__)
 
@@ -32,8 +32,7 @@ async def main() -> None:
         dp.include_router(start.router)
         dp.include_router(help.router)
         dp.include_router(url_handler.router)
-        dp.include_router(download_handler.router)
-        logger.info("Routers registered: /start, /help, URL handler, Download handler")
+        logger.info("Routers registered: /start, /help, URL handler")
 
         logger.info("Starting bot polling... (Press Ctrl+C to stop)")
         logger.info("=" * 60)
