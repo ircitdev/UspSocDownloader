@@ -5,6 +5,8 @@ from src.utils.logger import get_logger
 from src.bot import create_bot, close_bot
 from src.config import config
 from src.handlers import start, help, url_handler
+from src.utils.notifications import notification_manager
+from src.utils.sheets import sheets_manager
 
 logger = get_logger(__name__)
 
@@ -27,6 +29,16 @@ async def main() -> None:
         # Create bot instance
         bot, dp = await create_bot()
         _bot = bot
+
+        # Initialize notification manager with bot instance
+        notification_manager.set_bot(bot)
+        logger.info("Notification manager initialized")
+
+        # Initialize Google Sheets connection
+        if await sheets_manager.init():
+            logger.info("Google Sheets connected")
+        else:
+            logger.warning("Google Sheets not available - stats will not be recorded")
 
         # Register routers
         dp.include_router(start.router)

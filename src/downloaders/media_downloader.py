@@ -184,6 +184,19 @@ class MediaDownloader:
             logger.error(f"Error finding recent file: {e}")
         return None
 
+    def _find_recent_files(self, directory: Path, seconds: int = 120, count: int = 10) -> List[str]:
+        """Находит несколько недавно созданных файлов в директории"""
+        files = []
+        try:
+            for f in sorted(directory.glob("*"), key=lambda x: x.stat().st_mtime, reverse=True):
+                if f.is_file() and f.stat().st_mtime > time.time() - seconds:
+                    files.append(str(f))
+                    if len(files) >= count:
+                        break
+        except Exception as e:
+            logger.error(f"Error finding recent files: {e}")
+        return files
+
     async def download_video(self, url: str, platform: str = "unknown") -> DownloadInfo:
         try:
             logger.info(f"Starting video download from {platform}: {url}")
@@ -194,7 +207,7 @@ class MediaDownloader:
                 return DownloadInfo(success=False, platform=platform,
                     error_message="yt-dlp не установлен")
 
-            output_template = str(self.DOWNLOAD_DIRS["video"] / "%(title).50s.%(ext)s")
+            output_template = str(self.DOWNLOAD_DIRS["video"] / "%(title).50s_%(playlist_index|0)s.%(ext)s")
 
             ydl_opts = self.YDL_OPTS_VIDEO.copy()
             ydl_opts["outtmpl"] = output_template
@@ -214,12 +227,19 @@ class MediaDownloader:
                 return DownloadInfo(success=False, platform=platform,
                     error_message="Не удалось извлечь информацию о видео")
 
+            # Проверяем, есть ли контент для скачивания (для VK wallposts без видео)
+            entries = info.get("entries", [])
+            if info.get("_type") == "playlist" and not entries:
+                logger.warning(f"No downloadable content in {platform} post")
+                if platform.lower() == "vk":
+                    return DownloadInfo(success=False, platform=platform,
+                        error_message="В этом посте нет видео. Фото из VK пока не поддерживаются.")
+                return DownloadInfo(success=False, platform=platform,
+                    error_message="В этом посте нет видео для скачивания")
+
             title = info.get("title", "Unknown")
-            # Извлекаем описание поста
+            # Извлекаем описание поста (без ограничения - url_handler обрежет если нужно)
             description = info.get("description") or ""
-            # Ограничиваем длину описания для Telegram (caption max 1024)
-            if description and len(description) > 500:
-                description = description[:500] + "..."
 
             # Извлекаем метаданные
             author = info.get("channel") or info.get("uploader_id") or ""
@@ -229,7 +249,45 @@ class MediaDownloader:
             views = info.get("view_count")
             post_url = info.get("webpage_url") or url
 
-            # Пробуем найти файл
+            # Проверяем, является ли это плейлистом (Twitter с несколькими видео)
+            n_entries = info.get("playlist_count") or len(entries) if entries else 1
+            is_playlist = n_entries > 1
+            
+            if is_playlist:
+                # Twitter с несколькими видео - обрабатываем как карусель
+                logger.info(f"Detected playlist with {n_entries} entries from {platform}")
+                downloaded_files = self._find_recent_files(self.DOWNLOAD_DIRS["video"], count=n_entries)
+                
+                if downloaded_files:
+                    # Проверяем размер всех файлов
+                    valid_files = []
+                    total_size = 0
+                    for fp in downloaded_files:
+                        if os.path.exists(fp):
+                            fsize = os.path.getsize(fp)
+                            if fsize <= self.MAX_FILE_SIZES["video"]:
+                                valid_files.append(fp)
+                                total_size += fsize
+                            else:
+                                logger.warning(f"File too large, skipping: {fp} ({fsize} bytes)")
+                    
+                    if valid_files:
+                        duration = info.get("duration")
+                        logger.info(f"Multi-video downloaded: {title} ({len(valid_files)} files, {total_size} bytes)")
+                        return DownloadInfo(
+                            success=True, file_path=valid_files[0], file_paths=valid_files,
+                            file_size=total_size, duration=duration, title=title, description=description,
+                            author=author, author_name=author_name, likes=likes,
+                            comments=comments, views=views, url=post_url, platform=platform,
+                            is_carousel=True)
+                    else:
+                        return DownloadInfo(success=False, platform=platform,
+                            error_message="Все видео слишком большие (максимум 100 MB каждое)")
+                
+                return DownloadInfo(success=False, platform=platform,
+                    error_message="Файлы не найдены после загрузки")
+
+            # Пробуем найти файл (одиночное видео)
             filename = self._find_recent_file(self.DOWNLOAD_DIRS["video"])
 
             if filename and os.path.exists(filename):
@@ -261,7 +319,7 @@ class MediaDownloader:
             logger.info(f"Starting audio download from {platform}: {url}")
             import yt_dlp
 
-            output_template = str(self.DOWNLOAD_DIRS["audio"] / "%(title).50s.%(ext)s")
+            output_template = str(self.DOWNLOAD_DIRS["audio"] / "%(title).50s_%(playlist_index|0)s.%(ext)s")
             ydl_opts = self.YDL_OPTS_AUDIO.copy()
             ydl_opts["outtmpl"] = output_template
             ydl_opts.update(self._get_platform_opts(platform))
@@ -457,8 +515,6 @@ class MediaDownloader:
 
             title = entry.get("title", "Unknown")
             description = entry.get("description") or ""
-            if description and len(description) > 500:
-                description = description[:500] + "..."
 
             author = entry.get("channel") or entry.get("uploader_id") or ""
             likes = entry.get("like_count")
@@ -672,8 +728,6 @@ class MediaDownloader:
             # Метаданные из первого элемента
             first = entries[0]
             description = first.get("description") or ""
-            if description and len(description) > 500:
-                description = description[:500] + "..."
             author = first.get("channel") or first.get("uploader_id") or ""
             likes = first.get("like_count")
             comments = first.get("comment_count")

@@ -16,6 +16,9 @@ class Config:
     if not BOT_TOKEN:
         raise ValueError("BOT_TOKEN not found in .env file")
 
+    # Admin
+    ADMIN_ID: int = int(os.getenv("ADMIN_ID", "65876198"))
+
     # App
     APP_NAME: str = os.getenv("APP_NAME", "UspSocDownloader")
     DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"
@@ -47,7 +50,7 @@ class Config:
         """String representation of config."""
         return (
             f"Config(APP_NAME={self.APP_NAME}, DEBUG={self.DEBUG}, "
-            f"LOG_LEVEL={self.LOG_LEVEL}, BOT_TOKEN=***)"
+            f"LOG_LEVEL={self.LOG_LEVEL}, ADMIN_ID={self.ADMIN_ID}, BOT_TOKEN=***)"
         )
 
 

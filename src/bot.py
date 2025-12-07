@@ -1,6 +1,6 @@
 """Bot initialization and setup module."""
 from aiogram import Bot, Dispatcher
-from aiogram.types import BotCommand
+from aiogram.types import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 from aiogram.fsm.storage.memory import MemoryStorage
 import logging
 from src.config import config
@@ -10,17 +10,40 @@ logger = get_logger(__name__)
 
 
 async def setup_bot_commands(bot: Bot) -> None:
-    """Setup bot commands.
+    """Setup bot commands for users and admin.
 
     Args:
         bot: Bot instance
     """
-    commands = [
-        BotCommand(command="start", description="🚀 Start the bot"),
-        BotCommand(command="help", description="❓ Show help"),
+    # Команды для всех пользователей
+    user_commands = [
+        BotCommand(command="start", description="🚀 Запустить бота"),
+        BotCommand(command="help", description="❓ Справка по боту"),
+        BotCommand(command="stats", description="📊 Моя статистика"),
+        BotCommand(command="ref", description="🔗 Реферальная ссылка"),
     ]
-    await bot.set_my_commands(commands)
-    logger.info("Bot commands configured")
+    
+    # Дополнительные команды для админа
+    admin_commands = user_commands + [
+        BotCommand(command="admin", description="👑 Админ-панель"),
+        BotCommand(command="broadcast", description="📢 Рассылка всем"),
+        BotCommand(command="allstats", description="📈 Общая статистика"),
+        BotCommand(command="users", description="👥 Список пользователей"),
+    ]
+    
+    # Устанавливаем команды для всех
+    await bot.set_my_commands(user_commands, scope=BotCommandScopeDefault())
+    logger.info("User commands configured")
+    
+    # Устанавливаем расширенные команды для админа
+    try:
+        await bot.set_my_commands(
+            admin_commands, 
+            scope=BotCommandScopeChat(chat_id=config.ADMIN_ID)
+        )
+        logger.info(f"Admin commands configured for user {config.ADMIN_ID}")
+    except Exception as e:
+        logger.warning(f"Failed to set admin commands: {e}")
 
 
 async def create_bot() -> tuple[Bot, Dispatcher]:
