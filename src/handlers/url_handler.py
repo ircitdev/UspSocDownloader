@@ -54,18 +54,24 @@ async def handle_url_message(message: types.Message):
             return
 
         # Проверка лимита для бесплатных пользователей
+        is_premium_user = False
+        daily_count = 0
         if user_id != config.ADMIN_ID:
-            is_premium = await sheets_manager.is_user_premium(user_id)
-            if not is_premium:
+            is_premium_user = await sheets_manager.is_user_premium(user_id)
+            if not is_premium_user:
                 daily_count = await sheets_manager.get_user_daily_requests(user_id)
                 if daily_count >= FREE_DAILY_LIMIT:
                     logger.info(f"User {user_id}: Daily limit reached ({daily_count}/{FREE_DAILY_LIMIT})")
+                    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="💎 Получить Premium", callback_data="show_premium")]
+                    ])
                     await message.answer(
                         f"⚠️ <b>Достигнут дневной лимит</b>\n\n"
                         f"Вы использовали {daily_count} из {FREE_DAILY_LIMIT} бесплатных скачиваний сегодня.\n\n"
                         f"💎 Для снятия лимита получите Premium статус.\n"
                         f"Лимит обновится в полночь.",
-                        parse_mode="HTML"
+                        parse_mode="HTML",
+                        reply_markup=keyboard
                     )
                     return
 
@@ -124,7 +130,8 @@ async def handle_url_message(message: types.Message):
 
                 await process_download_result(
                     message, status_msg, download_result, url, url_info,
-                    platform_emoji, platform_name, user_id, username, start_time
+                    platform_emoji, platform_name, user_id, username, start_time,
+                    daily_count=daily_count, is_premium=is_premium_user
                 )
 
             except Exception as e:
@@ -601,7 +608,8 @@ async def handle_youtube_audio_callback(callback: CallbackQuery):
 
 
 async def process_download_result(message, status_msg, download_result, url, url_info,
-                                   platform_emoji, platform_name, user_id, username, start_time):
+                                   platform_emoji, platform_name, user_id, username, start_time,
+                                   daily_count: int = 0, is_premium: bool = False):
     """Обрабатывает результат загрузки и отправляет файл"""
 
     if download_result.success and download_result.file_path:
@@ -804,6 +812,36 @@ async def process_download_result(message, status_msg, download_result, url, url
                 logger.warning(f"Could not delete original message: {e}")
 
             logger.info(f"User {message.from_user.id}: File sent successfully")
+
+            # Уведомление о приближении к лимиту (для бесплатных пользователей)
+            if not is_premium and daily_count > 0:
+                remaining = FREE_DAILY_LIMIT - daily_count - 1  # -1 за текущее скачивание
+                if remaining <= 2 and remaining >= 0:
+                    # Показываем уведомление + кнопку "Поделиться"
+                    share_text = "Качай видео с Instagram, TikTok, YouTube без рекламы!"
+
+                    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text="📤 Поделиться ботом",
+                            switch_inline_query=share_text
+                        )],
+                        [InlineKeyboardButton(text="💎 Получить Premium", callback_data="show_premium")]
+                    ])
+
+                    if remaining == 0:
+                        limit_text = (
+                            f"⚠️ <b>Это было последнее бесплатное скачивание сегодня!</b>\n\n"
+                            f"Лимит обновится в полночь.\n"
+                            f"💎 Получите Premium для безлимитных скачиваний."
+                        )
+                    else:
+                        limit_text = (
+                            f"💡 <b>Осталось {remaining} бесплатных скачивани{'е' if remaining == 1 else 'я'} сегодня</b>\n\n"
+                            f"💎 Получите Premium для безлимитных скачиваний.\n"
+                            f"📤 Или поделитесь ботом с друзьями!"
+                        )
+
+                    await message.answer(limit_text, parse_mode="HTML", reply_markup=keyboard)
 
         except Exception as e:
             logger.error(f"Error sending file: {str(e)}")

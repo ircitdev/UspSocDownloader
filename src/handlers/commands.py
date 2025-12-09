@@ -1,7 +1,7 @@
 """Handler for user and admin commands."""
 from aiogram import Router, types, Bot
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from src.utils.logger import get_logger
 from src.utils.sheets import sheets_manager
 from src.config import config
@@ -72,6 +72,93 @@ async def ref_command(message: types.Message) -> None:
     ])
 
     await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+
+@router.message(Command("premium"))
+async def premium_command(message: types.Message) -> None:
+    """Показать тарифы и способы оплаты Premium."""
+    user_id = message.from_user.id
+    logger.info(f"User {user_id} requested premium info")
+
+    # Проверяем текущий статус пользователя
+    is_premium = await sheets_manager.is_user_premium(user_id)
+
+    if is_premium:
+        text = (
+            "⭐ <b>У вас уже есть Premium!</b>\n\n"
+            "Вам доступны все функции:\n"
+            "✅ Безлимитные скачивания\n"
+            "✅ HD качество (720p, 1080p)\n"
+            "✅ Приоритетная очередь\n"
+            "✅ Без рекламы\n\n"
+            "💎 Спасибо, что вы с нами!"
+        )
+        await message.answer(text, parse_mode="HTML")
+        return
+
+    # Получаем количество скачиваний сегодня
+    daily_count = await sheets_manager.get_user_daily_requests(user_id)
+
+    text = (
+        "💎 <b>Premium подписка</b>\n\n"
+        f"📊 Сегодня использовано: {daily_count}/10 бесплатных скачиваний\n\n"
+        "<b>Преимущества Premium:</b>\n"
+        "✅ Безлимитные скачивания (без лимита 10/день)\n"
+        "✅ HD качество YouTube (720p, 1080p)\n"
+        "✅ Приоритетная очередь\n"
+        "✅ Уникальные стили рерайта\n"
+        "✅ Без рекламы\n\n"
+        "<b>Тарифы:</b>\n"
+        "📅 1 месяц — <b>199 ₽</b>\n"
+        "📅 3 месяца — <b>499 ₽</b> <s>597 ₽</s>\n"
+        "📅 1 год — <b>1499 ₽</b> <s>2388 ₽</s>\n\n"
+        "💳 <b>Способы оплаты:</b>\n"
+        "• Банковская карта (Visa/MasterCard/МИР)\n"
+        "• СБП (Система быстрых платежей)\n"
+        "• ЮMoney\n\n"
+        "📩 Для оплаты напишите админу: @smit_support"
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Оплатить 1 месяц — 199 ₽", callback_data="pay_1month")],
+        [InlineKeyboardButton(text="💳 Оплатить 3 месяца — 499 ₽", callback_data="pay_3month")],
+        [InlineKeyboardButton(text="💳 Оплатить 1 год — 1499 ₽", callback_data="pay_1year")],
+        [InlineKeyboardButton(text="📩 Написать в поддержку", url="https://t.me/smit_support")]
+    ])
+
+    await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+
+@router.message(Command("platforms"))
+async def platforms_command(message: types.Message) -> None:
+    """Показать список поддерживаемых платформ."""
+    user_id = message.from_user.id
+    logger.info(f"User {user_id} requested platforms list")
+
+    text = (
+        "🌐 <b>Поддерживаемые платформы</b>\n\n"
+        "📸 <b>Instagram</b>\n"
+        "   • Фото и видео из постов\n"
+        "   • Reels\n"
+        "   • Карусели (несколько фото/видео)\n\n"
+        "🎵 <b>TikTok</b>\n"
+        "   • Видео без водяного знака\n\n"
+        "🎥 <b>YouTube</b>\n"
+        "   • Видео (360p бесплатно, HD для Premium)\n"
+        "   • Shorts\n"
+        "   • Аудио (MP3)\n\n"
+        "🐦 <b>Twitter / X</b>\n"
+        "   • Видео из твитов\n"
+        "   • Фото\n"
+        "   • GIF\n\n"
+        "📘 <b>Facebook</b>\n"
+        "   • Публичные видео\n"
+        "   • Reels\n\n"
+        "💡 <b>Как пользоваться:</b>\n"
+        "Просто отправьте ссылку на пост — бот всё скачает автоматически!"
+    )
+
+    await message.answer(text, parse_mode="HTML")
 
 
 # ==================== АДМИНСКИЕ КОМАНДЫ ====================
@@ -362,6 +449,167 @@ async def cancel_command(message: types.Message) -> None:
         await message.answer("❌ Обновление cookies отменено.")
     else:
         await message.answer("Нечего отменять.")
+
+
+# ==================== CALLBACK HANDLERS FOR PREMIUM ====================
+
+@router.callback_query(lambda c: c.data and c.data.startswith("pay_"))
+async def handle_payment_callback(callback: CallbackQuery) -> None:
+    """Обработка нажатий на кнопки оплаты."""
+    plan = callback.data.replace("pay_", "")
+
+    plans = {
+        "1month": ("1 месяц", "199 ₽"),
+        "3month": ("3 месяца", "499 ₽"),
+        "1year": ("1 год", "1499 ₽")
+    }
+
+    plan_name, plan_price = plans.get(plan, ("", ""))
+
+    if not plan_name:
+        await callback.answer("Неизвестный тариф", show_alert=True)
+        return
+
+    text = (
+        f"💳 <b>Оплата Premium — {plan_name}</b>\n\n"
+        f"Сумма: <b>{plan_price}</b>\n\n"
+        "Для оплаты:\n"
+        "1️⃣ Напишите @smit_support\n"
+        "2️⃣ Укажите выбранный тариф\n"
+        "3️⃣ Получите реквизиты для оплаты\n"
+        "4️⃣ После оплаты Premium активируется автоматически\n\n"
+        "⏱️ Обычно активация занимает до 15 минут"
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📩 Написать в поддержку", url="https://t.me/smit_support")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_premium")]
+    ])
+
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "back_to_premium")
+async def handle_back_to_premium_callback(callback: CallbackQuery) -> None:
+    """Возврат к экрану Premium."""
+    user_id = callback.from_user.id
+    daily_count = await sheets_manager.get_user_daily_requests(user_id)
+
+    text = (
+        "💎 <b>Premium подписка</b>\n\n"
+        f"📊 Сегодня использовано: {daily_count}/10 бесплатных скачиваний\n\n"
+        "<b>Преимущества Premium:</b>\n"
+        "✅ Безлимитные скачивания (без лимита 10/день)\n"
+        "✅ HD качество YouTube (720p, 1080p)\n"
+        "✅ Приоритетная очередь\n"
+        "✅ Уникальные стили рерайта\n"
+        "✅ Без рекламы\n\n"
+        "<b>Тарифы:</b>\n"
+        "📅 1 месяц — <b>199 ₽</b>\n"
+        "📅 3 месяца — <b>499 ₽</b> <s>597 ₽</s>\n"
+        "📅 1 год — <b>1499 ₽</b> <s>2388 ₽</s>\n\n"
+        "💳 <b>Способы оплаты:</b>\n"
+        "• Банковская карта (Visa/MasterCard/МИР)\n"
+        "• СБП (Система быстрых платежей)\n"
+        "• ЮMoney\n\n"
+        "📩 Для оплаты напишите админу: @smit_support"
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Оплатить 1 месяц — 199 ₽", callback_data="pay_1month")],
+        [InlineKeyboardButton(text="💳 Оплатить 3 месяца — 499 ₽", callback_data="pay_3month")],
+        [InlineKeyboardButton(text="💳 Оплатить 1 год — 1499 ₽", callback_data="pay_1year")],
+        [InlineKeyboardButton(text="📩 Написать в поддержку", url="https://t.me/smit_support")]
+    ])
+
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "show_premium")
+async def handle_show_premium_callback(callback: CallbackQuery) -> None:
+    """Показать экран Premium из callback."""
+    user_id = callback.from_user.id
+
+    # Проверяем текущий статус пользователя
+    is_premium = await sheets_manager.is_user_premium(user_id)
+
+    if is_premium:
+        text = (
+            "⭐ <b>У вас уже есть Premium!</b>\n\n"
+            "Вам доступны все функции:\n"
+            "✅ Безлимитные скачивания\n"
+            "✅ HD качество (720p, 1080p)\n"
+            "✅ Приоритетная очередь\n"
+            "✅ Без рекламы\n\n"
+            "💎 Спасибо, что вы с нами!"
+        )
+        await callback.message.answer(text, parse_mode="HTML")
+        await callback.answer()
+        return
+
+    daily_count = await sheets_manager.get_user_daily_requests(user_id)
+
+    text = (
+        "💎 <b>Premium подписка</b>\n\n"
+        f"📊 Сегодня использовано: {daily_count}/10 бесплатных скачиваний\n\n"
+        "<b>Преимущества Premium:</b>\n"
+        "✅ Безлимитные скачивания (без лимита 10/день)\n"
+        "✅ HD качество YouTube (720p, 1080p)\n"
+        "✅ Приоритетная очередь\n"
+        "✅ Уникальные стили рерайта\n"
+        "✅ Без рекламы\n\n"
+        "<b>Тарифы:</b>\n"
+        "📅 1 месяц — <b>199 ₽</b>\n"
+        "📅 3 месяца — <b>499 ₽</b> <s>597 ₽</s>\n"
+        "📅 1 год — <b>1499 ₽</b> <s>2388 ₽</s>\n\n"
+        "💳 <b>Способы оплаты:</b>\n"
+        "• Банковская карта (Visa/MasterCard/МИР)\n"
+        "• СБП (Система быстрых платежей)\n"
+        "• ЮMoney\n\n"
+        "📩 Для оплаты напишите админу: @smit_support"
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Оплатить 1 месяц — 199 ₽", callback_data="pay_1month")],
+        [InlineKeyboardButton(text="💳 Оплатить 3 месяца — 499 ₽", callback_data="pay_3month")],
+        [InlineKeyboardButton(text="💳 Оплатить 1 год — 1499 ₽", callback_data="pay_1year")],
+        [InlineKeyboardButton(text="📩 Написать в поддержку", url="https://t.me/smit_support")]
+    ])
+
+    await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "show_platforms")
+async def handle_show_platforms_callback(callback: CallbackQuery) -> None:
+    """Показать список платформ из callback."""
+    text = (
+        "🌐 <b>Поддерживаемые платформы</b>\n\n"
+        "📸 <b>Instagram</b>\n"
+        "   • Фото и видео из постов\n"
+        "   • Reels\n"
+        "   • Карусели (несколько фото/видео)\n\n"
+        "🎵 <b>TikTok</b>\n"
+        "   • Видео без водяного знака\n\n"
+        "🎥 <b>YouTube</b>\n"
+        "   • Видео (360p бесплатно, HD для Premium)\n"
+        "   • Shorts\n"
+        "   • Аудио (MP3)\n\n"
+        "🐦 <b>Twitter / X</b>\n"
+        "   • Видео из твитов\n"
+        "   • Фото\n"
+        "   • GIF\n\n"
+        "📘 <b>Facebook</b>\n"
+        "   • Публичные видео\n"
+        "   • Reels\n\n"
+        "💡 <b>Как пользоваться:</b>\n"
+        "Просто отправьте ссылку на пост — бот всё скачает автоматически!"
+    )
+
+    await callback.message.answer(text, parse_mode="HTML")
+    await callback.answer()
 
 
 @router.message(lambda msg: msg.from_user.id in _waiting_for_cookies and msg.document)
