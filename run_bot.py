@@ -7,6 +7,8 @@ from src.config import config
 from src.handlers import start, help as help_handler, url_handler, commands
 from src.utils.notifications import notification_manager
 from src.utils.sheets import sheets_manager
+from src.downloaders.media_downloader import media_downloader
+from src.utils.instagram_health import instagram_health
 
 logger = get_logger(__name__)
 
@@ -25,6 +27,11 @@ async def main():
         notification_manager.set_bot(bot)
         logger.info("Notification manager initialized")
 
+        # Initialize Instagram health checker
+        instagram_health.set_bot(bot)
+        instagram_health.start()
+        logger.info("Instagram health checker started (12h interval)")
+
         # Initialize Google Sheets connection
         if await sheets_manager.init():
             logger.info("Google Sheets connected")
@@ -38,8 +45,32 @@ async def main():
         dp.include_router(commands.router)
         logger.info("Routers registered: start, help, url_handler")
 
+        # Cleanup old files on startup (keep for 1 day)
+        media_downloader.cleanup_old_files(days=1)
+        logger.info("Old files cleanup completed (keeping files for 1 day)")
+
+        # Initial Instagram health check
+        is_ok, msg = await instagram_health.run_check(notify_on_success=False)
+        if is_ok:
+            logger.info(f"Instagram health: OK")
+        else:
+            logger.warning(f"Instagram health: {msg}")
+
+        # Start periodic cleanup task (every hour)
+        async def periodic_cleanup():
+            while True:
+                await asyncio.sleep(3600)  # 1 hour
+                media_downloader.cleanup_old_files(days=1)
+                logger.info("Periodic cleanup completed")
+        
+        cleanup_task = asyncio.create_task(periodic_cleanup())
+
         logger.info("Starting bot polling...")
         await dp.start_polling(bot)
+        
+        # Cancel cleanup task on shutdown
+        cleanup_task.cancel()
+        instagram_health.stop()
 
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)

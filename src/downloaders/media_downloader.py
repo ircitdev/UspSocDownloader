@@ -47,8 +47,8 @@ class MediaDownloader:
     }
 
     MAX_FILE_SIZES = {
-        "video": 100 * 1024 * 1024,
-        "audio": 50 * 1024 * 1024,
+        "video": 50 * 1024 * 1024,
+        "audio": 100 * 1024 * 1024,
         "photo": 10 * 1024 * 1024,
     }
 
@@ -58,6 +58,37 @@ class MediaDownloader:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
     ]
+
+    async def _get_quote_tweet_url(self, url: str) -> str:
+        """Извлекает URL процитированного твита если есть"""
+        try:
+            import re
+            loop = asyncio.get_event_loop()
+            
+            ydl_opts = {
+                "quiet": True,
+                "extract_flat": True,
+                "skip_download": True,
+                "no_warnings": True,
+            }
+            
+            def extract():
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    return ydl.extract_info(url, download=False)
+            
+            info = await loop.run_in_executor(None, extract)
+            
+            if info:
+                # Twitter включает URL цитируемого твита в description
+                description = info.get("description", "")
+                # Ищем ссылку на twitter/x в описании
+                match = re.search(r'https?://(?:twitter|x)\.com/\w+/status/(\d+)', description)
+                if match:
+                    return match.group(0)
+        except Exception as e:
+            logger.debug(f"Failed to get quote tweet URL: {e}")
+        return None
+
 
     YDL_OPTS_BASE = {
         "quiet": True,
@@ -219,6 +250,13 @@ class MediaDownloader:
                 error_str = str(e)
                 # Если нет видео - пробуем скачать как фото (Twitter/X часто содержит только картинки)
                 if "No video" in error_str or "no video" in error_str.lower():
+                    # Сначала проверяем quote tweet (ретвит с цитатой)
+                    if platform.lower() in ("x", "twitter"):
+                        quote_url = await self._get_quote_tweet_url(url)
+                        if quote_url and quote_url != url:
+                            logger.info(f"Found quote tweet, trying: {quote_url}")
+                            return await self.download_video(quote_url, platform)
+                    # Если не quote tweet - пробуем скачать как фото
                     logger.info(f"No video found, trying to download as photo from {platform}")
                     return await self.download_twitter_photo(url, platform)
                 raise
@@ -282,7 +320,7 @@ class MediaDownloader:
                             is_carousel=True)
                     else:
                         return DownloadInfo(success=False, platform=platform,
-                            error_message="Все видео слишком большие (максимум 100 MB каждое)")
+                            error_message="Все видео слишком большие (максимум 300 MB каждое)")
                 
                 return DownloadInfo(success=False, platform=platform,
                     error_message="Файлы не найдены после загрузки")
@@ -302,7 +340,7 @@ class MediaDownloader:
                         comments=comments, views=views, url=post_url, platform=platform)
                 else:
                     return DownloadInfo(success=False, platform=platform,
-                        error_message="Видео слишком большое (максимум 100 MB)")
+                        error_message="Видео слишком большое (максимум 300 MB)")
 
             return DownloadInfo(success=False, platform=platform,
                 error_message="Файл не найден после загрузки")
@@ -823,3 +861,7 @@ class MediaDownloader:
                         file_path.unlink()
         except Exception as e:
             logger.error(f"Error cleaning up: {str(e)}")
+
+
+# Singleton instance
+media_downloader = MediaDownloader()

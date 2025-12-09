@@ -167,7 +167,7 @@ class GoogleSheetsManager:
                 current_requests = ws.cell(row, 8).value or "0"
                 ws.update_cell(row, 8, int(current_requests) + 1)
                 return
-        except gspread.exceptions.CellNotFound:
+        except Exception as e:  # Cell not found or other error
             pass
 
         # New user
@@ -187,6 +187,8 @@ class GoogleSheetsManager:
             ""
         ])
 
+    _request_counter = 0  # Counter for auto-updating stats
+    
     async def log_request(self, user_id: int, username: str, platform: str,
                          content_type: str, url: str, success: bool,
                          file_size_mb: float = 0, duration_sec: float = 0,
@@ -205,6 +207,13 @@ class GoogleSheetsManager:
                 file_size_mb, duration_sec, error_message, processing_time,
                 ai_used, ai_type
             )
+            
+            # Auto-update daily stats every 10 requests
+            GoogleSheetsManager._request_counter += 1
+            if GoogleSheetsManager._request_counter >= 10:
+                GoogleSheetsManager._request_counter = 0
+                await self.update_daily_stats()
+            
             return True
         except Exception as e:
             logger.error(f"Error logging request: {e}")
@@ -299,9 +308,159 @@ class GoogleSheetsManager:
                     "total_requests": int(row[7]) if row[7] else 0,
                     "status": row[8]
                 }
-        except gspread.exceptions.CellNotFound:
+        except Exception as e:  # Cell not found or other error
             pass
         return None
+
+
+    async def update_daily_stats(self) -> bool:
+        """Обновляет ежедневную статистику на основе данных из Requests"""
+        if not await self.init():
+            return False
+
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self._sync_update_daily_stats)
+            return True
+        except Exception as e:
+            logger.error(f"Error updating daily stats: {e}")
+            return False
+
+    def _sync_update_daily_stats(self):
+        """Синхронное обновление ежедневной статистики"""
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        # Get all requests
+        requests_ws = self.spreadsheet.worksheet(self.SHEET_REQUESTS)
+        requests_data = requests_ws.get_all_records()
+        
+        # Get users count
+        users_ws = self.spreadsheet.worksheet(self.SHEET_USERS)
+        users_data = users_ws.get_all_records()
+        total_users = len(users_data)
+        
+        # Filter today's requests
+        today_requests = [r for r in requests_data if r.get('timestamp', '').startswith(today)]
+        
+        # Calculate stats
+        total_requests = len(today_requests)
+        successful = len([r for r in today_requests if r.get('success') == 'yes'])
+        failed = len([r for r in today_requests if r.get('success') == 'no'])
+        
+        # Platform breakdown
+        platforms = {'instagram': 0, 'youtube': 0, 'tiktok': 0, 'twitter': 0, 'vk': 0}
+        total_mb = 0
+        ai_translations = 0
+        ai_rewrites = 0
+        ai_ocr = 0
+        active_users = set()
+        
+        for r in today_requests:
+            platform = (r.get('platform') or '').lower()
+            if platform in platforms:
+                platforms[platform] += 1
+            
+            try:
+                total_mb += float(r.get('file_size_mb') or 0)
+            except:
+                pass
+            
+            ai_type = r.get('ai_type', '').lower()
+            if 'translat' in ai_type:
+                ai_translations += 1
+            elif 'rewrite' in ai_type:
+                ai_rewrites += 1
+            elif 'ocr' in ai_type:
+                ai_ocr += 1
+            
+            active_users.add(r.get('user_id'))
+        
+        # Count new users today
+        new_users = len([u for u in users_data if u.get('first_seen', '').startswith(today)])
+        
+        # Stats worksheet
+        stats_ws = self.spreadsheet.worksheet(self.SHEET_STATS)
+        
+        # Check if today's row exists
+        cell = stats_ws.find(today, in_column=1)
+        row_data = [
+            today, total_users, new_users, len(active_users), total_requests,
+            successful, failed, platforms['instagram'], platforms['youtube'],
+            platforms['tiktok'], platforms['twitter'], platforms['vk'],
+            round(total_mb, 2), ai_translations, ai_rewrites, ai_ocr
+        ]
+        
+        if cell:
+            # Update existing row
+            row = cell.row
+            stats_ws.update(f'A{row}:P{row}', [row_data])
+        else:
+            # Add new row
+            stats_ws.append_row(row_data)
+        
+        logger.info(f"Updated daily stats for {today}: {total_requests} requests, {successful} successful")
+
+
+
+    async def get_user_daily_requests(self, user_id: int) -> int:
+        """Возвращает количество успешных запросов пользователя за сегодня."""
+        if not await self.init():
+            return 0
+
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None,
+                self._sync_get_user_daily_requests,
+                user_id
+            )
+        except Exception as e:
+            logger.error(f"Error getting daily requests for {user_id}: {e}")
+            return 0
+
+    def _sync_get_user_daily_requests(self, user_id: int) -> int:
+        """Синхронное получение количества запросов за сегодня."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        ws = self.spreadsheet.worksheet(self.SHEET_REQUESTS)
+        requests = ws.get_all_records()
+        
+        count = 0
+        for r in requests:
+            if (str(r.get('user_id')) == str(user_id) and 
+                r.get('timestamp', '').startswith(today) and
+                r.get('success') == 'yes'):
+                count += 1
+        
+        return count
+
+    async def is_user_premium(self, user_id: int) -> bool:
+        """Проверяет, является ли пользователь премиум."""
+        if not await self.init():
+            return False
+
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None,
+                self._sync_is_user_premium,
+                user_id
+            )
+        except Exception as e:
+            logger.error(f"Error checking premium for {user_id}: {e}")
+            return False
+
+    def _sync_is_user_premium(self, user_id: int) -> bool:
+        """Синхронная проверка премиум статуса."""
+        ws = self.spreadsheet.worksheet(self.SHEET_USERS)
+        try:
+            cell = ws.find(str(user_id), in_column=1)
+            if cell:
+                row = ws.row_values(cell.row)
+                # Column 11 (index 10) is is_premium
+                return len(row) > 10 and row[10].lower() == 'yes'
+        except Exception:
+            pass
+        return False
 
 
 # Singleton instance

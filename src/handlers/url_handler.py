@@ -17,6 +17,10 @@ from src.localization.messages import (
     INVALID_MESSAGE, UNSUPPORTED_PLATFORM, PLATFORMS, CONTENT_TYPES
 )
 from src.utils.sheets import sheets_manager
+from src.config import config
+
+# Лимит бесплатных скачиваний в сутки
+FREE_DAILY_LIMIT = 10
 from src.utils.notifications import notification_manager
 
 logger = get_logger(__name__)
@@ -48,6 +52,22 @@ async def handle_url_message(message: types.Message):
             logger.info(f"User {user_id}: Invalid message - {error}")
             await message.answer(INVALID_MESSAGE)
             return
+
+        # Проверка лимита для бесплатных пользователей
+        if user_id != config.ADMIN_ID:
+            is_premium = await sheets_manager.is_user_premium(user_id)
+            if not is_premium:
+                daily_count = await sheets_manager.get_user_daily_requests(user_id)
+                if daily_count >= FREE_DAILY_LIMIT:
+                    logger.info(f"User {user_id}: Daily limit reached ({daily_count}/{FREE_DAILY_LIMIT})")
+                    await message.answer(
+                        f"⚠️ <b>Достигнут дневной лимит</b>\n\n"
+                        f"Вы использовали {daily_count} из {FREE_DAILY_LIMIT} бесплатных скачиваний сегодня.\n\n"
+                        f"💎 Для снятия лимита получите Premium статус.\n"
+                        f"Лимит обновится в полночь.",
+                        parse_mode="HTML"
+                    )
+                    return
 
         # Обрабатываем каждый найденный URL
         for url in urls:
