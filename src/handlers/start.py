@@ -1,6 +1,7 @@
 """Handler for /start command."""
 from aiogram import Router, types
 from aiogram.filters import Command, CommandStart
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from src.utils.logger import get_logger
 from src.localization.messages import START_WELCOME
 from src.utils.sheets import sheets_manager
@@ -65,14 +66,25 @@ async def start_command(message: types.Message) -> None:
                 referrer_id=referrer_id
             )
 
+        # Кнопки быстрого доступа
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🌐 Платформы", callback_data="show_platforms"),
+                InlineKeyboardButton(text="💎 Premium", callback_data="show_premium")
+            ],
+            [
+                InlineKeyboardButton(text="📤 Поделиться ботом", switch_inline_query="Качай видео с Instagram, TikTok, YouTube!")
+            ]
+        ])
+
         # Отправляем приветственное сообщение
-        await message.answer(START_WELCOME)
+        await message.answer(START_WELCOME, parse_mode="HTML", reply_markup=keyboard)
         logger.debug(f"Welcome message sent to {user_id}")
 
     except Exception as e:
         logger.error(f"Error in start command: {e}", exc_info=True)
         # Всё равно отправляем приветствие
         try:
-            await message.answer(START_WELCOME)
+            await message.answer(START_WELCOME, parse_mode="HTML")
         except:
             await message.answer("❌ Произошла ошибка. Попробуйте позже.")
