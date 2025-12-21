@@ -122,6 +122,171 @@ class MediaDownloader:
     def __init__(self):
         self._ensure_directories()
 
+    async def get_youtube_formats(self, url: str) -> Optional[Dict]:
+        """Получить доступные форматы YouTube видео"""
+        import yt_dlp
+
+        try:
+            ydl_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "extract_flat": False,
+                "skip_download": True,
+            }
+
+            loop = asyncio.get_event_loop()
+
+            def extract():
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    return ydl.extract_info(url, download=False)
+
+            info = await loop.run_in_executor(None, extract)
+
+            if not info:
+                return None
+
+            formats = info.get("formats", [])
+            result = {
+                "title": info.get("title", ""),
+                "duration": info.get("duration", 0),
+            }
+
+            # Собираем доступные качества
+            for fmt in formats:
+                height = fmt.get("height")
+                if height and fmt.get("ext") == "mp4":
+                    if height in [360, 480, 720, 1080]:
+                        if height not in result:
+                            result[height] = {
+                                "format_id": fmt.get("format_id"),
+                                "filesize": fmt.get("filesize") or fmt.get("filesize_approx", 0),
+                                "ext": fmt.get("ext"),
+                            }
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error getting YouTube formats: {e}")
+            return None
+
+    async def download_youtube_quality(self, url: str, quality: int = 360) -> DownloadInfo:
+        """Скачать YouTube видео в указанном качестве"""
+        import yt_dlp
+
+        try:
+            output_dir = self.DOWNLOAD_DIRS["video"]
+            output_template = str(output_dir / f"%(id)s_{quality}p.%(ext)s")
+
+            format_str = f"best[height<={quality}][ext=mp4]/best[height<={quality}]/best"
+
+            ydl_opts = {
+                **self.YDL_OPTS_BASE,
+                "format": format_str,
+                "outtmpl": output_template,
+                "postprocessors": [],
+            }
+
+            loop = asyncio.get_event_loop()
+
+            def download():
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    return ydl.extract_info(url, download=True)
+
+            info = await loop.run_in_executor(None, download)
+
+            if not info:
+                return DownloadInfo(success=False, error_message="Не удалось получить информацию о видео")
+
+            # Найти скачанный файл
+            video_id = info.get("id", "unknown")
+            possible_files = list(output_dir.glob(f"{video_id}_{quality}p.*"))
+
+            if not possible_files:
+                possible_files = list(output_dir.glob(f"{video_id}*"))
+
+            if not possible_files:
+                return DownloadInfo(success=False, error_message="Файл не найден после загрузки")
+
+            file_path = possible_files[0]
+            file_size = file_path.stat().st_size
+
+            # Проверка размера
+            if file_size > self.MAX_FILE_SIZES["video"]:
+                file_path.unlink()
+                return DownloadInfo(
+                    success=False,
+                    error_message=f"Видео слишком большое ({file_size // (1024*1024)} MB, максимум 50 MB)"
+                )
+
+            return DownloadInfo(
+                success=True,
+                file_path=str(file_path),
+                file_size=file_size,
+                duration=info.get("duration"),
+                title=info.get("title"),
+                author=info.get("uploader"),
+                views=info.get("view_count"),
+                likes=info.get("like_count"),
+                platform="YouTube"
+            )
+
+        except Exception as e:
+            logger.error(f"Error downloading YouTube {quality}p: {e}")
+            return DownloadInfo(success=False, error_message=str(e))
+
+    async def download_youtube_audio(self, url: str) -> DownloadInfo:
+        """Скачать только аудио с YouTube"""
+        import yt_dlp
+
+        try:
+            output_dir = self.DOWNLOAD_DIRS["audio"]
+            output_template = str(output_dir / "%(id)s.%(ext)s")
+
+            ydl_opts = {
+                **self.YDL_OPTS_BASE,
+                "format": "bestaudio/best",
+                "outtmpl": output_template,
+                "postprocessors": [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                }],
+            }
+
+            loop = asyncio.get_event_loop()
+
+            def download():
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    return ydl.extract_info(url, download=True)
+
+            info = await loop.run_in_executor(None, download)
+
+            if not info:
+                return DownloadInfo(success=False, error_message="Не удалось получить информацию")
+
+            video_id = info.get("id", "unknown")
+            possible_files = list(output_dir.glob(f"{video_id}.*"))
+
+            if not possible_files:
+                return DownloadInfo(success=False, error_message="Аудио файл не найден")
+
+            file_path = possible_files[0]
+            file_size = file_path.stat().st_size
+
+            return DownloadInfo(
+                success=True,
+                file_path=str(file_path),
+                file_size=file_size,
+                duration=info.get("duration"),
+                title=info.get("title"),
+                author=info.get("uploader"),
+                platform="YouTube"
+            )
+
+        except Exception as e:
+            logger.error(f"Error downloading YouTube audio: {e}")
+            return DownloadInfo(success=False, error_message=str(e))
+
     @classmethod
     def _ensure_directories(cls):
         for dir_path in cls.DOWNLOAD_DIRS.values():
