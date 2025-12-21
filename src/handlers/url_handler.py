@@ -121,9 +121,9 @@ async def handle_url_message(message: types.Message):
             )
 
             try:
-                # Загружаем медиа
+                # Загружаем медиа (используем url_info.url - может быть нормализован)
                 download_result = await media_downloader.download(
-                    url=url,
+                    url=url_info.url,
                     content_type=url_info.content_type,
                     platform=platform_name,
                 )
@@ -267,12 +267,15 @@ async def handle_youtube_quality_callback(callback: CallbackQuery):
         user_id = cache_data.get("user_id", callback.from_user.id)
         username = cache_data.get("username", callback.from_user.username)
 
-        # Если качество НЕ 360p - показываем PRO-экран
-        if quality != 360:
+        # Проверяем Premium статус для HD качества
+        is_premium = await sheets_manager.is_user_premium(user_id)
+
+        # Если качество НЕ 360p и пользователь НЕ Premium - показываем PRO-экран
+        if quality != 360 and not is_premium:
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [
                     InlineKeyboardButton(text="◀️ Назад", callback_data="yt_back"),
-                    InlineKeyboardButton(text="⭐ Стать PRO", callback_data="become_pro"),
+                    InlineKeyboardButton(text="⭐ Стать PRO", callback_data="show_premium"),
                 ]
             ])
 
@@ -286,7 +289,7 @@ async def handle_youtube_quality_callback(callback: CallbackQuery):
             await callback.answer()
             return
 
-        # 360p - скачиваем бесплатно
+        # 360p бесплатно или Premium пользователь - скачиваем
         await callback.answer("⏳ Начинаю загрузку...")
 
         await callback.message.edit_text(
@@ -363,6 +366,10 @@ async def handle_youtube_quality_callback(callback: CallbackQuery):
                 else:
                     stats += f" ❤️ {likes}"
             caption_parts.append(stats)
+
+            # Рекламная строка
+            caption_parts.append("")
+            caption_parts.append("🔻 Посты из соц.сетей в личку @UspSocDownloader\\_bot")
 
             caption = "\n".join(caption_parts)
 
@@ -543,6 +550,10 @@ async def handle_youtube_audio_callback(callback: CallbackQuery):
                 stats += f" ⏱️ {minutes}:{seconds:02d}"
             caption_parts.append(stats)
 
+            # Рекламная строка
+            caption_parts.append("")
+            caption_parts.append("🔻 Посты из соц.сетей в личку @UspSocDownloader\\_bot")
+
             caption = "\n".join(caption_parts)
 
             # Удаляем сообщение со статусом
@@ -683,6 +694,10 @@ async def process_download_result(message, status_msg, download_result, url, url
             else:
                 stats += f" 👁 {views}"
         caption_parts.append(stats)
+
+        # Рекламная строка
+        caption_parts.append("")
+        caption_parts.append("🔻 Посты из соц.сетей в личку @UspSocDownloader\\_bot")
 
         # Описание поста - отправляем отдельным сообщением
         description_text = download_result.description or ""

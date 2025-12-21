@@ -59,6 +59,7 @@ class URLProcessor:
         r"https?://(?:www\.)?vk\.com/video(-?\d+_\d+)",  # video
         r"https?://(?:www\.)?vk\.com/wall(-?\d+)\?.*",  # wall posts
         r"https?://vk\.com/(?:wall|video)(-?\d+_\d+)",  # short formats
+        r"https?://(?:www\.)?vk\.com/video_ext\.php\?.*oid=(-?\d+).*id=(\d+)",  # embedded video
     ]
 
     X_PATTERNS = [
@@ -151,11 +152,26 @@ class URLProcessor:
     @staticmethod
     def extract_vk_id(url: str) -> Tuple[Optional[str], Optional[str]]:
         """Извлекает ID из VK URL"""
+        from urllib.parse import urlparse, parse_qs
+
+        # Специальная обработка video_ext.php (embedded video)
+        if "video_ext.php" in url:
+            try:
+                parsed = urlparse(url)
+                params = parse_qs(parsed.query)
+                oid = params.get("oid", [None])[0]
+                vid = params.get("id", [None])[0]
+                if oid and vid:
+                    post_id = f"{oid}_{vid}"
+                    return post_id, "video"
+            except Exception:
+                pass
+
         for pattern in URLProcessor.VK_PATTERNS:
             match = re.search(pattern, url)
             if match:
                 post_id = match.group(1)
-                
+
                 # Определяем тип контента
                 if "/video" in url:
                     content_type = "video"
@@ -165,7 +181,7 @@ class URLProcessor:
                     content_type = "photo"
                 else:
                     content_type = "post"
-                
+
                 return post_id, content_type
 
         return None, None
@@ -243,9 +259,13 @@ class URLProcessor:
 
         elif platform == Platform.VK:
             post_id, content_type = self.extract_vk_id(url)
+            # Нормализуем URL для yt-dlp (video_ext.php -> vk.com/video)
+            normalized_url = url
+            if "video_ext.php" in url and post_id and content_type == "video":
+                normalized_url = f"https://vk.com/video{post_id}"
             return URLInfo(
                 platform=platform,
-                url=url,
+                url=normalized_url,
                 post_id=post_id,
                 content_type=content_type,
                 is_valid=post_id is not None,
