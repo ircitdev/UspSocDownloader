@@ -34,6 +34,7 @@ class DownloadInfo:
     error_message: Optional[str] = None
     platform: Optional[str] = None
     is_carousel: bool = False  # Карусель из нескольких медиа
+    is_too_large: bool = False  # Файл слишком большой для Telegram video
 
 
 class MediaDownloader:
@@ -47,7 +48,7 @@ class MediaDownloader:
     }
 
     MAX_FILE_SIZES = {
-        "video": 50 * 1024 * 1024,
+        "video": 200 * 1024 * 1024,  # 200 MB
         "audio": 100 * 1024 * 1024,
         "photo": 10 * 1024 * 1024,
     }
@@ -339,6 +340,22 @@ class MediaDownloader:
             opts.update({
                 "format": "best[height<=720][ext=mp4]/best[height<=720]/best",
             })
+        elif platform.lower() == "vk":
+            import os
+            vk_user = os.getenv("VK_USERNAME")
+            vk_pass = os.getenv("VK_PASSWORD")
+            opts.update({
+                "format": "best[ext=mp4]/best",
+            })
+            if vk_user and vk_pass:
+                opts["username"] = vk_user
+                opts["password"] = vk_pass
+                logger.info("Using VK login credentials")
+            else:
+                cookies_file = self.COOKIES_DIR / "data/cookies/vk_cookies.txt"
+                if cookies_file.exists():
+                    opts["cookiefile"] = str(cookies_file)
+                    logger.info("Using VK cookies")
 
         return opts
 
@@ -494,18 +511,16 @@ class MediaDownloader:
             filename = self._find_recent_file(self.DOWNLOAD_DIRS["video"])
 
             if filename and os.path.exists(filename):
-                if self._check_file_size(Path(filename), "video"):
-                    file_size = os.path.getsize(filename)
-                    duration = info.get("duration")
-                    logger.info(f"Video downloaded: {title} ({file_size} bytes)")
-                    return DownloadInfo(
-                        success=True, file_path=filename, file_size=file_size,
-                        duration=duration, title=title, description=description,
-                        author=author, author_name=author_name, likes=likes,
-                        comments=comments, views=views, url=post_url, platform=platform)
-                else:
-                    return DownloadInfo(success=False, platform=platform,
-                        error_message="Видео слишком большое (максимум 300 MB)")
+                file_size = os.path.getsize(filename)
+                duration = info.get("duration")
+                is_too_large = not self._check_file_size(Path(filename), "video")
+                logger.info(f"Video downloaded: {title} ({file_size} bytes, too_large={is_too_large})")
+                return DownloadInfo(
+                    success=True, file_path=filename, file_size=file_size,
+                    duration=duration, title=title, description=description,
+                    author=author, author_name=author_name, likes=likes,
+                    comments=comments, views=views, url=post_url, platform=platform,
+                    is_too_large=is_too_large)
 
             return DownloadInfo(success=False, platform=platform,
                 error_message="Файл не найден после загрузки")

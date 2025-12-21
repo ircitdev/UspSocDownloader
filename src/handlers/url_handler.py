@@ -36,6 +36,9 @@ from src.utils.cache import image_paths_cache, original_texts_cache
 youtube_urls_cache = {}  # message_id -> url
 youtube_formats_cache = {}  # message_id -> {360: {...}, 480: {...}, ...}
 
+# Кэш для больших файлов
+large_files_cache = {}  # message_id -> {file_path, platform, user_id, ...}
+
 
 @router.message(F.text.regexp(r'https?://'))
 async def handle_url_message(message: types.Message):
@@ -56,7 +59,9 @@ async def handle_url_message(message: types.Message):
         # Проверка лимита для бесплатных пользователей
         is_premium_user = False
         daily_count = 0
-        if user_id != config.ADMIN_ID:
+        if user_id == config.ADMIN_ID:
+            is_premium_user = True  # Админ всегда Premium
+        else:
             is_premium_user = await sheets_manager.is_user_premium(user_id)
             if not is_premium_user:
                 daily_count = await sheets_manager.get_user_daily_requests(user_id)
@@ -623,6 +628,64 @@ async def process_download_result(message, status_msg, download_result, url, url
                                    daily_count: int = 0, is_premium: bool = False):
     """Обрабатывает результат загрузки и отправляет файл"""
 
+    # Обработка слишком большого файла
+    if download_result.success and download_result.is_too_large:
+        file_path = download_result.file_path
+        file_size_mb = download_result.file_size / (1024 * 1024)
+
+        try:
+            await status_msg.delete()
+        except:
+            pass
+
+        # Кэшируем путь для callback
+        large_files_cache[message.message_id] = {
+            "file_path": file_path,
+            "platform": platform_name,
+            "user_id": user_id,
+            "username": username,
+            "url": url,
+            "download_result": download_result
+        }
+
+        if is_premium:
+            # Premium - показываем кнопку отправки как файл
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📄 Отправить как файл", callback_data=f"send_as_file_{message.message_id}")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_large_file")]
+            ])
+            await message.answer(
+                f"⚠️ *Файл слишком большой*\n\n"
+                f"Платформа: {platform_name}\n"
+                f"Размер: {file_size_mb:.1f} MB (лимит 200 MB)\n\n"
+                f"💎 Как Premium пользователь, вы можете получить файл без сжатия.",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+        else:
+            # Бесплатный пользователь - только предупреждение
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💎 Получить Premium", callback_data="show_premium")]
+            ])
+            await message.answer(
+                f"⚠️ *Файл слишком большой*\n\n"
+                f"Платформа: {platform_name}\n"
+                f"Размер: {file_size_mb:.1f} MB (лимит 200 MB)\n\n"
+                f"💎 Premium пользователи могут скачивать большие файлы.",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+
+        # Удаляем файл если не Premium
+        if not is_premium and file_path:
+            try:
+                import os
+                os.remove(file_path)
+            except:
+                pass
+
+        return
+
     if download_result.success and download_result.file_path:
         file_path = download_result.file_path
         file_size_mb = download_result.file_size / (1024 * 1024)
@@ -1155,3 +1218,108 @@ async def handle_ocr_extract_callback(callback: CallbackQuery):
     except Exception as e:
         logger.error(f"Error in OCR callback: {e}")
         await callback.answer(f"Ошибка OCR: {str(e)[:50]}", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("send_as_file_"))
+async def handle_send_as_file_callback(callback: CallbackQuery):
+    """Отправляет большой файл как документ (только для Premium)"""
+    try:
+        message_id = int(callback.data.replace("send_as_file_", ""))
+        cache_data = large_files_cache.get(message_id)
+
+        if not cache_data:
+            await callback.answer("Файл не найден. Попробуйте скачать заново.", show_alert=True)
+            return
+
+        file_path = cache_data.get("file_path")
+        platform = cache_data.get("platform")
+        download_result = cache_data.get("download_result")
+
+        if not file_path:
+            await callback.answer("Файл не найден", show_alert=True)
+            return
+
+        import os
+        if not os.path.exists(file_path):
+            await callback.answer("Файл был удалён. Скачайте заново.", show_alert=True)
+            return
+
+        await callback.answer("📤 Отправка файла...")
+
+        await callback.message.edit_text(
+            f"📤 *Отправка файла...*\n\n"
+            f"Это может занять некоторое время для больших файлов.",
+            parse_mode="Markdown",
+            reply_markup=None
+        )
+
+        file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+
+        # Формируем caption
+        caption_parts = [f"✅ {platform}", ""]
+        if download_result and download_result.author:
+            caption_parts.append(f"📝 {download_result.author}")
+        caption_parts.append(f"📊 {file_size_mb:.1f} MB")
+        if download_result and download_result.duration:
+            minutes = int(download_result.duration // 60)
+            seconds = int(download_result.duration % 60)
+            caption_parts.append(f"⏱️ {minutes}:{seconds:02d}")
+        caption_parts.append("")
+        caption_parts.append("🔻 Посты из соц.сетей в личку @UspSocDownloader\\_bot")
+        caption = "\n".join(caption_parts)
+
+        # Отправляем как документ
+        await callback.message.answer_document(
+            types.FSInputFile(file_path),
+            caption=caption,
+            parse_mode="Markdown"
+        )
+
+        # Удаляем сообщение с предупреждением
+        try:
+            await callback.message.delete()
+        except:
+            pass
+
+        # Удаляем файл
+        try:
+            os.remove(file_path)
+        except:
+            pass
+
+        # Удаляем из кэша
+        large_files_cache.pop(message_id, None)
+
+        logger.info(f"User {callback.from_user.id}: Large file sent as document ({file_size_mb:.1f} MB)")
+
+    except Exception as e:
+        logger.error(f"Error sending large file: {e}")
+        await callback.answer(f"Ошибка: {str(e)[:50]}", show_alert=True)
+
+
+@router.callback_query(F.data == "cancel_large_file")
+async def handle_cancel_large_file_callback(callback: CallbackQuery):
+    """Отменяет отправку большого файла"""
+    try:
+        await callback.answer("Отменено")
+
+        await callback.message.edit_text(
+            "❌ Отправка отменена.\n\n"
+            "Файл был удалён.",
+            reply_markup=None
+        )
+
+        # Удаляем файлы из кэша
+        for msg_id, data in list(large_files_cache.items()):
+            if data.get("user_id") == callback.from_user.id:
+                file_path = data.get("file_path")
+                if file_path:
+                    try:
+                        import os
+                        os.remove(file_path)
+                    except:
+                        pass
+                large_files_cache.pop(msg_id, None)
+
+    except Exception as e:
+        logger.error(f"Error canceling large file: {e}")
