@@ -182,7 +182,7 @@ async def admin_command(message: types.Message) -> None:
         "<b>Доступные команды:</b>\n\n"
         "/allstats - 📈 Общая статистика бота\n"
         "/users - 👥 Список пользователей\n"
-        "/broadcast <текст> - 📢 Рассылка всем\n"
+        "/broadcast &lt;текст&gt; - 📢 Рассылка всем\n"
         "/checkinstagram - 🔍 Проверить Instagram\n"
         "/setcookies - 🍪 Обновить cookies\n\n"
         "<b>Ссылки:</b>\n"
