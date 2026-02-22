@@ -28,6 +28,7 @@ class Config:
     LOGS_DIR: Path = BASE_DIR / "logs"
     DATA_DIR: Path = BASE_DIR / "data"
     TEMP_DIR: Path = DATA_DIR / "temp"
+    DATABASE_PATH: Path = DATA_DIR / "bot_data.db"
 
     # Create directories if they don't exist
     LOGS_DIR.mkdir(exist_ok=True)

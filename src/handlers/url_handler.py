@@ -19,6 +19,7 @@ from src.localization.messages import (
 )
 from src.utils.sheets import sheets_manager
 from src.config import config
+from src.database.db_manager import db_manager
 
 # Лимит бесплатных скачиваний в сутки
 FREE_DAILY_LIMIT = 10
@@ -950,6 +951,25 @@ async def process_download_result(message, status_msg, download_result, url, url
                 logger.warning(f"Could not delete original message: {e}")
 
             logger.info(f"User {message.from_user.id}: File sent successfully")
+
+            # Сохраняем в историю загрузок
+            try:
+                if db_manager:
+                    download_id = await db_manager.add_download_history(
+                        user_id=user_id,
+                        url=url,
+                        platform=platform_name,
+                        content_type=url_info.content_type,
+                        file_path=file_path if not download_result.is_carousel else None,
+                        file_size=int(file_size_mb * 1024 * 1024),
+                        title=download_result.title or "",
+                        author=download_result.author or "",
+                        thumbnail_url=None
+                    )
+                    if download_id:
+                        logger.info(f"Download saved to history: ID {download_id}")
+            except Exception as e:
+                logger.error(f"Failed to save download history: {e}")
 
             # Уведомление о приближении к лимиту (для бесплатных пользователей)
             if not is_premium and daily_count > 0:

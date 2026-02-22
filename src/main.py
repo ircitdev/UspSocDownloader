@@ -7,6 +7,7 @@ from src.config import config
 from src.handlers import start, help, url_handler, commands
 from src.utils.notifications import notification_manager
 from src.utils.sheets import sheets_manager
+from src.database.db_manager import init_database
 
 logger = get_logger(__name__)
 
@@ -26,6 +27,10 @@ async def main() -> None:
 
     bot = None
     try:
+        # Initialize database
+        init_database(config.DATABASE_PATH)
+        logger.info(f"Database initialized at {config.DATABASE_PATH}")
+
         # Create bot instance
         bot, dp = await create_bot()
         _bot = bot
