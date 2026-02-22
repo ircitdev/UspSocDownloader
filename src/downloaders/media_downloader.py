@@ -803,7 +803,7 @@ class MediaDownloader:
             cmd = ["gallery-dl", "-j"] + cookies_arg + [url]
             result = await loop.run_in_executor(
                 None,
-                lambda: subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                lambda: subprocess.run(cmd, capture_output=True, text=True, timeout=180)
             )
 
             if result.returncode != 0 or not result.stdout.strip():

@@ -156,7 +156,9 @@ async def handle_url_message(message: types.Message):
                     await status_msg.delete()
                 except:
                     pass
-                await message.answer(f"❌ Ошибка загрузки: {safe_format_error(e)}")
+                # Отправляем без parse_mode, чтобы избежать проблем с HTML entities
+                error_text = str(e)[:100]
+                await message.answer(f"❌ Ошибка загрузки: {error_text}")
 
     except Exception as e:
         logger.error(f"Error handling URL message from user {message.from_user.id}: {str(e)}")
