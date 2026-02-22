@@ -167,11 +167,15 @@ async def platforms_command(message: types.Message) -> None:
 @router.message(Command("admin"))
 async def admin_command(message: types.Message) -> None:
     """Админ-панель."""
-    if not is_admin(message.from_user.id):
+    user_id = message.from_user.id
+    logger.info(f"User {user_id} called /admin command (admin ID: {config.ADMIN_ID})")
+
+    if not is_admin(user_id):
+        logger.warning(f"User {user_id} attempted to access admin panel (not authorized)")
         await message.answer("❌ У вас нет доступа к этой команде.")
         return
 
-    logger.info(f"Admin {message.from_user.id} opened admin panel")
+    logger.info(f"Admin {user_id} opened admin panel")
 
     text = (
         "👑 <b>Админ-панель</b>\n\n"
