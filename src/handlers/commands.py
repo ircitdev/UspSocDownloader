@@ -6,7 +6,7 @@ from src.utils.logger import get_logger
 from src.utils.sheets import sheets_manager
 from src.utils.text_helpers import safe_format_error
 from src.config import config
-from src.database.db_manager import db_manager
+from src.database.db_manager import get_db_manager
 
 logger = get_logger(__name__)
 router = Router()
@@ -170,11 +170,12 @@ async def settings_command(message: types.Message) -> None:
     logger.info(f"User {user_id} opened settings")
 
     try:
-        if not db_manager:
+        db = get_db_manager()
+        if not db:
             await message.answer("⚠️ Настройки временно недоступны")
             return
 
-        settings = await db_manager.get_user_settings(user_id)
+        settings = await db.get_user_settings(user_id)
 
         # Создаем inline keyboard с настройками
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -1011,8 +1012,9 @@ async def set_quality_callback(callback: CallbackQuery) -> None:
             )
             return
 
-    if db_manager:
-        success = await db_manager.update_user_settings(user_id, default_quality=quality)
+    db = get_db_manager()
+    if db:
+        success = await db.update_user_settings(user_id, default_quality=quality)
         if success:
             await callback.answer(f"✅ Качество изменено на {quality}")
             # Возврат к настройкам
@@ -1049,8 +1051,9 @@ async def set_format_callback(callback: CallbackQuery) -> None:
     format_type = callback.data.replace("set_format_", "")
     user_id = callback.from_user.id
 
-    if db_manager:
-        success = await db_manager.update_user_settings(user_id, default_format=format_type)
+    db = get_db_manager()
+    if db:
+        success = await db.update_user_settings(user_id, default_format=format_type)
         if success:
             await callback.answer(f"✅ Формат изменен на {format_type.upper()}")
             await settings_command(callback.message)
@@ -1088,8 +1091,9 @@ async def set_autodelete_callback(callback: CallbackQuery) -> None:
     days = int(callback.data.replace("set_autodelete_", ""))
     user_id = callback.from_user.id
 
-    if db_manager:
-        success = await db_manager.update_user_settings(user_id, auto_delete_after_days=days)
+    db = get_db_manager()
+    if db:
+        success = await db.update_user_settings(user_id, auto_delete_after_days=days)
         if success:
             days_text = "никогда" if days == 999 else f"через {days} дней"
             await callback.answer(f"✅ Файлы будут удаляться {days_text}")
@@ -1105,11 +1109,12 @@ async def settings_notifications_callback(callback: CallbackQuery) -> None:
     """Переключить уведомления."""
     user_id = callback.from_user.id
 
-    if db_manager:
-        settings = await db_manager.get_user_settings(user_id)
+    db = get_db_manager()
+    if db:
+        settings = await db.get_user_settings(user_id)
         new_value = not settings['notifications_enabled']
 
-        success = await db_manager.update_user_settings(user_id, notifications_enabled=new_value)
+        success = await db.update_user_settings(user_id, notifications_enabled=new_value)
         if success:
             status = "включены" if new_value else "выключены"
             await callback.answer(f"✅ Уведомления {status}")

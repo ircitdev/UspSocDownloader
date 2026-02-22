@@ -531,7 +531,7 @@ class DatabaseManager:
 
 
 # Global instance
-db_manager: Optional[DatabaseManager] = None
+_db_manager: Optional[DatabaseManager] = None
 
 
 def init_database(db_path: Path) -> DatabaseManager:
@@ -543,6 +543,15 @@ def init_database(db_path: Path) -> DatabaseManager:
     Returns:
         DatabaseManager instance
     """
-    global db_manager
-    db_manager = DatabaseManager(db_path)
-    return db_manager
+    global _db_manager
+    _db_manager = DatabaseManager(db_path)
+    return _db_manager
+
+
+def get_db_manager() -> Optional[DatabaseManager]:
+    """Get the global database manager instance.
+
+    Returns:
+        DatabaseManager instance or None if not initialized
+    """
+    return _db_manager

@@ -19,7 +19,7 @@ from src.localization.messages import (
 )
 from src.utils.sheets import sheets_manager
 from src.config import config
-from src.database.db_manager import db_manager
+from src.database.db_manager import get_db_manager
 
 # Лимит бесплатных скачиваний в сутки
 FREE_DAILY_LIMIT = 10
@@ -954,8 +954,9 @@ async def process_download_result(message, status_msg, download_result, url, url
 
             # Сохраняем в историю загрузок
             try:
-                if db_manager:
-                    download_id = await db_manager.add_download_history(
+                db = get_db_manager()
+                if db:
+                    download_id = await db.add_download_history(
                         user_id=user_id,
                         url=url,
                         platform=platform_name,

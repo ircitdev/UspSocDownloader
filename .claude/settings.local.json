@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit:*)",
+      "Bash(del \"d:\\DevTools\\Database\\UspSocDownloader\\temp_telegram_provider.php\")",
+      "Bash(copy:*)",
+      "Bash(copy \"d:\\DevTools\\Database\\UspSocDownloader\\translator_new.py\" \"d:\\DevTools\\Database\\UspSocDownloader\\src\\utils\\translator.py\" /Y)",
+      "Bash(copy \"d:\\DevTools\\Database\\UspSocDownloader\\media_downloader_new.py\" \"d:\\DevTools\\Database\\UspSocDownloader\\src\\downloaders\\media_downloader.py\" /Y)",
+      "Bash(find:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
