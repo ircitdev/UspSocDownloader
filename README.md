@@ -50,6 +50,15 @@ Telegram-бот для скачивания видео, фото и карусе
 | Рерайт | 3 стиля: экспертный, юмористический, дружелюбный | gpt-4o-mini |
 | OCR | Извлечение текста с изображений | gpt-4o (vision) |
 
+### Админ-панель
+
+- Интерактивное меню с кнопками быстрого доступа
+- Просмотр статистики бота (пользователи, запросы, успешность)
+- Список топ-20 активных пользователей
+- Управление Instagram cookies
+- Проверка состояния Instagram
+- Рассылка сообщений всем пользователям
+
 ---
 
 ## Архитектура
@@ -64,6 +73,7 @@ UspSocDownloader/
 │   ├── handlers/
 │   │   ├── start.py            # /start command
 │   │   ├── help.py             # /help command
+│   │   ├── commands.py         # User & admin commands
 │   │   └── url_handler.py      # URL processing + callbacks
 │   │
 │   ├── downloaders/
@@ -75,7 +85,10 @@ UspSocDownloader/
 │   ├── utils/
 │   │   ├── logger.py           # Logging
 │   │   ├── validators.py       # Input validation
-│   │   └── translator.py       # OpenAI: translate, rewrite, OCR
+│   │   ├── translator.py       # OpenAI: translate, rewrite, OCR
+│   │   ├── text_helpers.py     # Safe text formatting
+│   │   ├── sheets.py           # Google Sheets integration
+│   │   └── notifications.py    # Telegram notifications
 │   │
 │   └── localization/
 │       └── messages.py         # UI messages (Russian)
@@ -233,6 +246,20 @@ https://vk.com/video-123_456
 | `rewrite_humor` | Рерайт в юмористическом стиле |
 | `rewrite_friendly` | Рерайт в дружелюбном стиле |
 | `ocr_extract` | Извлечение текста с изображений |
+| `admin_panel` | Админ-панель (только для администратора) |
+| `admin_stats` | Просмотр статистики |
+| `admin_users` | Список пользователей |
+
+### Admin Commands
+
+| Команда | Описание |
+|---------|----------|
+| `/admin` | Открыть админ-панель |
+| `/allstats` | Общая статистика бота |
+| `/users` | Список всех пользователей |
+| `/broadcast` | Рассылка сообщений |
+| `/checkinstagram` | Проверить состояние Instagram |
+| `/setcookies` | Обновить Instagram cookies |
 
 ### Translator Functions
 
@@ -284,6 +311,14 @@ mypy src
 ---
 
 ## Changelog
+
+### v1.3.0 (2025-02-22)
+
+- **Админ-панель**: интерактивное меню с кнопками для администратора
+- **Безопасность**: экранирование HTML в сообщениях об ошибках (исправлена ошибка парсинга entities)
+- **VK**: поддержка vk.ru домена для видео и stories
+- **Лимиты**: увеличен лимит видео до 300 MB для Premium
+- **UX**: админ видит кнопку "Админ-панель" в стартовом меню
 
 ### v1.2.0 (2025-12-07)
 

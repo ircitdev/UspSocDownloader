@@ -4,6 +4,7 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from src.utils.logger import get_logger
 from src.utils.sheets import sheets_manager
+from src.utils.text_helpers import safe_format_error
 from src.config import config
 
 logger = get_logger(__name__)
@@ -257,7 +258,7 @@ async def allstats_command(message: types.Message) -> None:
 
     except Exception as e:
         logger.error(f"Error getting all stats: {e}")
-        await message.answer(f"❌ Ошибка: {str(e)[:100]}")
+        await message.answer(f"❌ Ошибка: {safe_format_error(e)}")
 
 
 @router.message(Command("users"))
@@ -307,7 +308,7 @@ async def users_command(message: types.Message) -> None:
 
     except Exception as e:
         logger.error(f"Error getting users: {e}")
-        await message.answer(f"❌ Ошибка: {str(e)[:100]}")
+        await message.answer(f"❌ Ошибка: {safe_format_error(e)}")
 
 
 @router.message(Command("broadcast"))
@@ -380,7 +381,7 @@ async def broadcast_command(message: types.Message) -> None:
 
     except Exception as e:
         logger.error(f"Broadcast error: {e}")
-        await message.answer(f"❌ Ошибка рассылки: {str(e)[:100]}")
+        await message.answer(f"❌ Ошибка рассылки: {safe_format_error(e)}")
 
 
 # ==================== INSTAGRAM COOKIES MANAGEMENT ====================
@@ -636,7 +637,7 @@ async def receive_cookies_file(message: types.Message) -> None:
             
     except Exception as e:
         logger.error(f"Error processing cookies file: {e}")
-        await message.answer(f"❌ Ошибка обработки файла: {str(e)[:100]}")
+        await message.answer(f"❌ Ошибка обработки файла: {safe_format_error(e)}")
 
 
 @router.message(lambda msg: msg.from_user.id in _waiting_for_cookies and msg.text and not msg.text.startswith('/'))
@@ -664,3 +665,246 @@ async def receive_cookies_text(message: types.Message) -> None:
         await status_msg.edit_text(f"✅ {result_message}", parse_mode="HTML")
     else:
         await status_msg.edit_text(f"❌ {result_message}", parse_mode="HTML")
+
+
+# ==================== CALLBACK HANDLERS ====================
+
+@router.callback_query(lambda c: c.data == "admin_panel")
+async def admin_panel_callback(callback: CallbackQuery) -> None:
+    """Показать админ-панель через callback."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет доступа к этой панели.", show_alert=True)
+        return
+
+    logger.info(f"Admin {callback.from_user.id} opened admin panel via callback")
+
+    text = (
+        "👑 <b>Админ-панель</b>\n\n"
+        "<b>Доступные команды:</b>\n\n"
+        "/admin - 👑 Админ-панель\n"
+        "/allstats - 📈 Общая статистика бота\n"
+        "/users - 👥 Список пользователей\n"
+        "/broadcast - 📢 Рассылка всем\n"
+        "/checkinstagram - 🔍 Проверить Instagram\n"
+        "/setcookies - 🍪 Обновить cookies\n\n"
+        "<b>Ссылки:</b>\n"
+        "📊 <a href='https://docs.google.com/spreadsheets/d/1cQhOc-FyY5uF7cLC2nH0jht2pITrt0bc3swhvfhVUoI/'>Google Sheets</a>\n"
+        "💬 <a href='https://t.me/c/3307715316/'>Супергруппа уведомлений</a>"
+    )
+
+    # Создаём кнопки для быстрого доступа
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📈 Статистика", callback_data="admin_stats"),
+            InlineKeyboardButton(text="👥 Пользователи", callback_data="admin_users")
+        ],
+        [
+            InlineKeyboardButton(text="🔍 Проверить Instagram", callback_data="admin_check_ig"),
+            InlineKeyboardButton(text="🍪 Обновить cookies", callback_data="admin_set_cookies")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_start")
+        ]
+    ])
+
+    await callback.message.edit_text(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "back_to_start")
+async def back_to_start_callback(callback: CallbackQuery) -> None:
+    """Вернуться к стартовому сообщению."""
+    from src.localization.messages import START_WELCOME
+
+    user_id = callback.from_user.id
+
+    # Кнопки быстрого доступа (как в /start)
+    if user_id == config.ADMIN_ID:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🌐 Платформы", callback_data="show_platforms"),
+                InlineKeyboardButton(text="💎 Premium", callback_data="show_premium")
+            ],
+            [
+                InlineKeyboardButton(text="⚙️ Админ-панель", callback_data="admin_panel")
+            ],
+            [
+                InlineKeyboardButton(text="📤 Поделиться ботом", switch_inline_query="Качай видео с Instagram, TikTok, YouTube!")
+            ]
+        ])
+    else:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🌐 Платформы", callback_data="show_platforms"),
+                InlineKeyboardButton(text="💎 Premium", callback_data="show_premium")
+            ],
+            [
+                InlineKeyboardButton(text="📤 Поделиться ботом", switch_inline_query="Качай видео с Instagram, TikTok, YouTube!")
+            ]
+        ])
+
+    await callback.message.edit_text(START_WELCOME, parse_mode="HTML", reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "admin_stats")
+async def admin_stats_callback(callback: CallbackQuery) -> None:
+    """Показать статистику через callback."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет доступа.", show_alert=True)
+        return
+
+    await callback.answer("📊 Получаю статистику...")
+
+    # Используем код из allstats_command
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
+
+        def get_stats():
+            data = sheets_manager.sheet.get_all_records()
+            if not data:
+                return None
+
+            total_users = len(set(record.get("user_id") for record in data if record.get("user_id")))
+            premium_users = len(set(
+                record.get("user_id") for record in data
+                if record.get("user_id") and record.get("is_premium") == "TRUE"
+            ))
+            total_requests = len([r for r in data if r.get("platform")])
+            successful = len([r for r in data if r.get("status") == "success"])
+
+            platforms = {}
+            for record in data:
+                platform = record.get("platform")
+                if platform:
+                    platforms[platform] = platforms.get(platform, 0) + 1
+
+            return {
+                "total_users": total_users,
+                "premium_users": premium_users,
+                "total_requests": total_requests,
+                "successful": successful,
+                "platforms": platforms
+            }
+
+        stats = await loop.run_in_executor(None, get_stats)
+
+        if not stats:
+            await callback.message.answer("❌ Нет данных для отображения статистики.")
+            return
+
+        success_rate = (stats["successful"] / stats["total_requests"] * 100) if stats["total_requests"] > 0 else 0
+
+        platform_text = "\n".join([
+            f"  • {p}: {c}" for p, c in sorted(stats["platforms"].items(), key=lambda x: -x[1])
+        ]) or "  Нет данных"
+
+        text = (
+            "📈 <b>Общая статистика</b>\n\n"
+            f"👥 <b>Пользователи:</b> {stats['total_users']}\n"
+            f"  ⭐ Premium: {stats['premium_users']}\n\n"
+            f"📥 <b>Запросы:</b> {stats['total_requests']}\n"
+            f"  ✅ Успешных: {stats['successful']} ({success_rate:.1f}%)\n"
+            f"  ❌ Ошибок: {stats['total_requests'] - stats['successful']}\n\n"
+            f"📊 <b>По платформам:</b>\n{platform_text}"
+        )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Админ-панель", callback_data="admin_panel")]
+        ])
+
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+    except Exception as e:
+        logger.error(f"Error getting stats in callback: {e}")
+        await callback.message.answer(f"❌ Ошибка: {safe_format_error(e)}")
+
+
+@router.callback_query(lambda c: c.data == "admin_users")
+async def admin_users_callback(callback: CallbackQuery) -> None:
+    """Показать список пользователей через callback."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет доступа.", show_alert=True)
+        return
+
+    await callback.answer("👥 Получаю список пользователей...")
+
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
+
+        def get_users():
+            data = sheets_manager.sheet.get_all_records()
+            if not data:
+                return []
+
+            users_dict = {}
+            for record in data:
+                user_id = record.get("user_id")
+                if not user_id:
+                    continue
+
+                if user_id not in users_dict:
+                    users_dict[user_id] = {
+                        "username": record.get("username", "н/д"),
+                        "first_name": record.get("first_name", ""),
+                        "last_name": record.get("last_name", ""),
+                        "is_premium": record.get("is_premium") == "TRUE",
+                        "first_seen": record.get("first_seen", ""),
+                        "request_count": 0
+                    }
+
+                if record.get("platform"):
+                    users_dict[user_id]["request_count"] += 1
+
+            return sorted(users_dict.items(), key=lambda x: x[1]["request_count"], reverse=True)
+
+        users = await loop.run_in_executor(None, get_users)
+
+        if not users:
+            text = "👥 <b>Пользователи</b>\n\nПользователей пока нет."
+        else:
+            users_list = []
+            for i, (user_id, info) in enumerate(users[:20], 1):  # Показываем топ-20
+                name = info["first_name"] or info["username"] or "Без имени"
+                premium = "⭐" if info["is_premium"] else ""
+                users_list.append(
+                    f"{i}. {premium} <code>{user_id}</code> - {name} ({info['request_count']} зап.)"
+                )
+
+            text = (
+                f"👥 <b>Пользователи</b> (топ-20)\n\n"
+                f"Всего: {len(users)}\n\n" +
+                "\n".join(users_list)
+            )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Админ-панель", callback_data="admin_panel")]
+        ])
+
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+    except Exception as e:
+        logger.error(f"Error getting users in callback: {e}")
+        await callback.message.answer(f"❌ Ошибка: {safe_format_error(e)}")
+
+
+@router.callback_query(lambda c: c.data == "admin_check_ig")
+async def admin_check_ig_callback(callback: CallbackQuery) -> None:
+    """Проверка Instagram через callback."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет доступа.", show_alert=True)
+        return
+
+    await callback.answer("🔍 Используйте команду /checkinstagram для проверки", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data == "admin_set_cookies")
+async def admin_set_cookies_callback(callback: CallbackQuery) -> None:
+    """Обновление cookies через callback."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет доступа.", show_alert=True)
+        return
+
+    await callback.answer("🍪 Используйте команду /setcookies для обновления cookies", show_alert=True)

@@ -9,6 +9,7 @@ from src.utils.logger import get_logger
 from src.processors.url_processor import URLProcessor, Platform
 from src.downloaders.media_downloader import MediaDownloader
 from src.utils.validators import MessageValidator
+from src.utils.text_helpers import safe_format_error
 from src.utils.translator import (
     is_russian_text, translate_to_russian, rewrite_text,
     check_images_have_text, extract_text_from_images
@@ -155,7 +156,7 @@ async def handle_url_message(message: types.Message):
                     await status_msg.delete()
                 except:
                     pass
-                await message.answer(f"❌ Ошибка загрузки: {str(e)[:100]}")
+                await message.answer(f"❌ Ошибка загрузки: {safe_format_error(e)}")
 
     except Exception as e:
         logger.error(f"Error handling URL message from user {message.from_user.id}: {str(e)}")
@@ -435,7 +436,7 @@ async def handle_youtube_quality_callback(callback: CallbackQuery):
 
     except Exception as e:
         logger.error(f"Error in YouTube quality callback: {e}")
-        await callback.answer(f"Ошибка: {str(e)[:50]}", show_alert=True)
+        await callback.answer(f"Ошибка: {safe_format_error(e, 50)}", show_alert=True)
 
 
 @router.callback_query(F.data == "yt_back")
@@ -472,7 +473,7 @@ async def handle_youtube_back_callback(callback: CallbackQuery):
 
     except Exception as e:
         logger.error(f"Error in YouTube back callback: {e}")
-        await callback.answer(f"Ошибка: {str(e)[:50]}", show_alert=True)
+        await callback.answer(f"Ошибка: {safe_format_error(e, 50)}", show_alert=True)
 
 
 @router.callback_query(F.data == "yt_audio_only")
@@ -620,7 +621,7 @@ async def handle_youtube_audio_callback(callback: CallbackQuery):
 
     except Exception as e:
         logger.error(f"Error in YouTube audio callback: {e}")
-        await callback.answer(f"Ошибка: {str(e)[:50]}", show_alert=True)
+        await callback.answer(f"Ошибка: {safe_format_error(e, 50)}", show_alert=True)
 
 
 async def process_download_result(message, status_msg, download_result, url, url_info,
@@ -657,7 +658,7 @@ async def process_download_result(message, status_msg, download_result, url, url
             await message.answer(
                 f"⚠️ *Файл слишком большой*\n\n"
                 f"Платформа: {platform_name}\n"
-                f"Размер: {file_size_mb:.1f} MB (лимит 200 MB)\n\n"
+                f"Размер: {file_size_mb:.1f} MB (лимит 300 MB)\n\n"
                 f"💎 Как Premium пользователь, вы можете получить файл без сжатия.",
                 parse_mode="Markdown",
                 reply_markup=keyboard
@@ -670,7 +671,7 @@ async def process_download_result(message, status_msg, download_result, url, url
             await message.answer(
                 f"⚠️ *Файл слишком большой*\n\n"
                 f"Платформа: {platform_name}\n"
-                f"Размер: {file_size_mb:.1f} MB (лимит 200 MB)\n\n"
+                f"Размер: {file_size_mb:.1f} MB (лимит 300 MB)\n\n"
                 f"💎 Premium пользователи могут скачивать большие файлы.",
                 parse_mode="Markdown",
                 reply_markup=keyboard
@@ -692,6 +693,63 @@ async def process_download_result(message, status_msg, download_result, url, url
         processing_time = time.time() - start_time
 
         logger.info(f"User {user_id}: Download successful ({file_size_mb:.1f} MB)")
+
+        # Telegram Bot API лимит для video ~50 MB
+        # Если файл больше - предлагаем отправить как документ
+        if file_size_mb > 50 and url_info.content_type in ["video", "reel", "shorts", "clip"]:
+            try:
+                await status_msg.delete()
+            except:
+                pass
+
+            # Кэшируем путь для callback
+            large_files_cache[message.message_id] = {
+                "file_path": file_path,
+                "platform": platform_name,
+                "user_id": user_id,
+                "username": username,
+                "url": url,
+                "download_result": download_result
+            }
+
+            if is_premium:
+                # Premium - показываем кнопку отправки как файл
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📄 Отправить как файл", callback_data=f"send_as_file_{message.message_id}")],
+                    [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_large_file")]
+                ])
+                await message.answer(
+                    f"⚠️ *Видео больше 50 MB*\n\n"
+                    f"Платформа: {platform_name}\n"
+                    f"Размер: {file_size_mb:.1f} MB\n\n"
+                    f"Telegram не поддерживает отправку видео >50 MB через Bot API.\n"
+                    f"💎 Как Premium пользователь, вы можете получить файл как документ.",
+                    parse_mode="Markdown",
+                    reply_markup=keyboard
+                )
+            else:
+                # Бесплатный пользователь - только предупреждение
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="💎 Получить Premium", callback_data="show_premium")]
+                ])
+                await message.answer(
+                    f"⚠️ *Видео больше 50 MB*\n\n"
+                    f"Платформа: {platform_name}\n"
+                    f"Размер: {file_size_mb:.1f} MB\n\n"
+                    f"Telegram не поддерживает отправку видео >50 MB через Bot API.\n"
+                    f"💎 Premium пользователи могут получать большие файлы как документы.",
+                    parse_mode="Markdown",
+                    reply_markup=keyboard
+                )
+
+                # Удаляем файл
+                try:
+                    import os
+                    os.remove(file_path)
+                except:
+                    pass
+
+            return
 
         # Логируем в Google Sheets
         await sheets_manager.log_request(
@@ -1010,7 +1068,7 @@ async def handle_translate_callback(callback: CallbackQuery):
 
     except Exception as e:
         logger.error(f"Error in translate callback: {e}")
-        await callback.answer(f"Ошибка перевода: {str(e)[:50]}", show_alert=True)
+        await callback.answer(f"Ошибка перевода: {safe_format_error(e, 50)}", show_alert=True)
 
 
 @router.callback_query(F.data == "rewrite_menu")
@@ -1036,7 +1094,7 @@ async def handle_rewrite_menu_callback(callback: CallbackQuery):
 
     except Exception as e:
         logger.error(f"Error in rewrite menu callback: {e}")
-        await callback.answer(f"Ошибка: {str(e)[:50]}", show_alert=True)
+        await callback.answer(f"Ошибка: {safe_format_error(e, 50)}", show_alert=True)
 
 
 @router.callback_query(F.data == "rewrite_mystyle")
@@ -1061,7 +1119,7 @@ async def handle_rewrite_mystyle_callback(callback: CallbackQuery):
 
     except Exception as e:
         logger.error(f"Error in mystyle callback: {e}")
-        await callback.answer(f"Ошибка: {str(e)[:50]}", show_alert=True)
+        await callback.answer(f"Ошибка: {safe_format_error(e, 50)}", show_alert=True)
 
 
 @router.callback_query(F.data == "become_pro")
@@ -1072,7 +1130,7 @@ async def handle_become_pro_callback(callback: CallbackQuery):
 
     except Exception as e:
         logger.error(f"Error in become_pro callback: {e}")
-        await callback.answer(f"Ошибка: {str(e)[:50]}", show_alert=True)
+        await callback.answer(f"Ошибка: {safe_format_error(e, 50)}", show_alert=True)
 
 
 @router.callback_query(F.data == "rewrite_back")
@@ -1097,7 +1155,7 @@ async def handle_rewrite_back_callback(callback: CallbackQuery):
 
     except Exception as e:
         logger.error(f"Error in rewrite back callback: {e}")
-        await callback.answer(f"Ошибка: {str(e)[:50]}", show_alert=True)
+        await callback.answer(f"Ошибка: {safe_format_error(e, 50)}", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("rewrite_"))
@@ -1152,7 +1210,7 @@ async def handle_rewrite_style_callback(callback: CallbackQuery):
 
     except Exception as e:
         logger.error(f"Error in rewrite style callback: {e}")
-        await callback.answer(f"Ошибка рерайта: {str(e)[:50]}", show_alert=True)
+        await callback.answer(f"Ошибка рерайта: {safe_format_error(e, 50)}", show_alert=True)
 
 
 @router.callback_query(F.data == "ocr_extract")
@@ -1217,7 +1275,7 @@ async def handle_ocr_extract_callback(callback: CallbackQuery):
 
     except Exception as e:
         logger.error(f"Error in OCR callback: {e}")
-        await callback.answer(f"Ошибка OCR: {str(e)[:50]}", show_alert=True)
+        await callback.answer(f"Ошибка OCR: {safe_format_error(e, 50)}", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("send_as_file_"))
@@ -1294,7 +1352,7 @@ async def handle_send_as_file_callback(callback: CallbackQuery):
 
     except Exception as e:
         logger.error(f"Error sending large file: {e}")
-        await callback.answer(f"Ошибка: {str(e)[:50]}", show_alert=True)
+        await callback.answer(f"Ошибка: {safe_format_error(e, 50)}", show_alert=True)
 
 
 @router.callback_query(F.data == "cancel_large_file")

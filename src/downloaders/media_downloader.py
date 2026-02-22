@@ -48,7 +48,7 @@ class MediaDownloader:
     }
 
     MAX_FILE_SIZES = {
-        "video": 200 * 1024 * 1024,  # 200 MB
+        "video": 300 * 1024 * 1024,  # 300 MB
         "audio": 100 * 1024 * 1024,
         "photo": 10 * 1024 * 1024,
     }

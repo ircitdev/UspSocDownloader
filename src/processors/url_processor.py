@@ -61,6 +61,7 @@ class URLProcessor:
         r"https?://vk\.com/(?:wall|video)(-?\d+_\d+)",  # short formats
         r"https?://(?:www\.)?vk\.com/video_ext\.php\?.*",  # embedded video (handled separately)
         r"https?://(?:www\.)?vkvideo\.ru/.*video(-?\d+_\d+)",  # vkvideo.ru
+        r"https?://(?:www\.)?vk\.ru/(?:story|video|wall)(-?\d+_\d+)",  # vk.ru
     ]
 
     X_PATTERNS = [
@@ -83,7 +84,7 @@ class URLProcessor:
             return Platform.YOUTUBE
         elif "tiktok.com" in url_lower or "vm.tiktok.com" in url_lower or "vt.tiktok.com" in url_lower:
             return Platform.TIKTOK
-        elif "vk.com" in url_lower or "vkontakte.com" in url_lower or "vkvideo.ru" in url_lower:
+        elif "vk.com" in url_lower or "vkontakte.com" in url_lower or "vkvideo.ru" in url_lower or "vk.ru" in url_lower:
             return Platform.VK
         elif "twitter.com" in url_lower or "x.com" in url_lower:
             return Platform.X
@@ -260,11 +261,13 @@ class URLProcessor:
 
         elif platform == Platform.VK:
             post_id, content_type = self.extract_vk_id(url)
-            # Нормализуем URL для yt-dlp (video_ext.php, vkvideo.ru -> vk.com/video)
+            # Нормализуем URL для yt-dlp (video_ext.php, vkvideo.ru, vk.ru -> vk.com)
             normalized_url = url
-            if post_id and content_type == "video":
-                if "video_ext.php" in url or "vkvideo.ru" in url:
-                    normalized_url = f"https://vk.com/video{post_id}"
+            if post_id:
+                if "video_ext.php" in url or "vkvideo.ru" in url or "vk.ru" in url:
+                    # Конвертируем в стандартный формат
+                    if content_type == "video" or "story" in url:
+                        normalized_url = f"https://vk.com/video{post_id}"
             return URLInfo(
                 platform=platform,
                 url=normalized_url,

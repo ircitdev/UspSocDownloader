@@ -6,6 +6,7 @@ from src.utils.logger import get_logger
 from src.localization.messages import START_WELCOME
 from src.utils.sheets import sheets_manager
 from src.utils.notifications import notification_manager
+from src.config import config
 
 logger = get_logger(__name__)
 router = Router()
@@ -67,15 +68,30 @@ async def start_command(message: types.Message) -> None:
             )
 
         # Кнопки быстрого доступа
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🌐 Платформы", callback_data="show_platforms"),
-                InlineKeyboardButton(text="💎 Premium", callback_data="show_premium")
-            ],
-            [
-                InlineKeyboardButton(text="📤 Поделиться ботом", switch_inline_query="Качай видео с Instagram, TikTok, YouTube!")
-            ]
-        ])
+        # Для админа добавляем кнопку админ-панели
+        if user_id == config.ADMIN_ID:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="🌐 Платформы", callback_data="show_platforms"),
+                    InlineKeyboardButton(text="💎 Premium", callback_data="show_premium")
+                ],
+                [
+                    InlineKeyboardButton(text="⚙️ Админ-панель", callback_data="admin_panel")
+                ],
+                [
+                    InlineKeyboardButton(text="📤 Поделиться ботом", switch_inline_query="Качай видео с Instagram, TikTok, YouTube!")
+                ]
+            ])
+        else:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="🌐 Платформы", callback_data="show_platforms"),
+                    InlineKeyboardButton(text="💎 Premium", callback_data="show_premium")
+                ],
+                [
+                    InlineKeyboardButton(text="📤 Поделиться ботом", switch_inline_query="Качай видео с Instagram, TikTok, YouTube!")
+                ]
+            ])
 
         # Отправляем приветственное сообщение
         await message.answer(START_WELCOME, parse_mode="HTML", reply_markup=keyboard)
