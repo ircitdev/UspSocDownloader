@@ -801,13 +801,25 @@ class MediaDownloader:
 
             # Используем gallery-dl -j для получения JSON с метаданными и URL
             cmd = ["gallery-dl", "-j"] + cookies_arg + [url]
-            result = await loop.run_in_executor(
-                None,
-                lambda: subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-            )
+
+            try:
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+                )
+            except subprocess.TimeoutExpired:
+                logger.error("gallery-dl timeout (likely Instagram rate limit)")
+                return DownloadInfo(success=False, platform=platform,
+                    error_message="Instagram временно ограничил доступ. Попробуйте через несколько минут.")
 
             if result.returncode != 0 or not result.stdout.strip():
-                logger.error(f"gallery-dl failed: {result.stderr}")
+                stderr = result.stderr if hasattr(result, 'stderr') else ""
+                # Проверяем на rate limit
+                if "429" in stderr or "Too Many Requests" in stderr or "Waiting until" in stderr:
+                    return DownloadInfo(success=False, platform=platform,
+                        error_message="Instagram временно ограничил доступ. Попробуйте через несколько минут.")
+
+                logger.error(f"gallery-dl failed: {stderr}")
                 return DownloadInfo(success=False, platform=platform,
                     error_message="Не удалось получить информацию о посте Instagram")
 
