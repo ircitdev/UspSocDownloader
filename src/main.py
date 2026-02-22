@@ -4,7 +4,7 @@ import logging
 from src.utils.logger import get_logger
 from src.bot import create_bot, close_bot
 from src.config import config
-from src.handlers import start, help, url_handler
+from src.handlers import start, help, url_handler, commands
 from src.utils.notifications import notification_manager
 from src.utils.sheets import sheets_manager
 
@@ -43,8 +43,9 @@ async def main() -> None:
         # Register routers
         dp.include_router(start.router)
         dp.include_router(help.router)
+        dp.include_router(commands.router)
         dp.include_router(url_handler.router)
-        logger.info("Routers registered: /start, /help, URL handler")
+        logger.info("Routers registered: start, help, commands, url_handler")
 
         logger.info("Starting bot polling... (Press Ctrl+C to stop)")
         logger.info("=" * 60)
