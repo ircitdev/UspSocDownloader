@@ -1,7 +1,7 @@
 """Handler for /start command."""
 from aiogram import Router, types
 from aiogram.filters import Command, CommandStart
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from src.utils.logger import get_logger
 from src.localization.messages import START_WELCOME
 from src.utils.sheets import sheets_manager
