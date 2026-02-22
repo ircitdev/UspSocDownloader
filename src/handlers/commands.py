@@ -6,6 +6,7 @@ from src.utils.logger import get_logger
 from src.utils.sheets import sheets_manager
 from src.utils.text_helpers import safe_format_error
 from src.config import config
+from src.database.db_manager import db_manager
 
 logger = get_logger(__name__)
 router = Router()
@@ -160,6 +161,63 @@ async def platforms_command(message: types.Message) -> None:
     )
 
     await message.answer(text, parse_mode="HTML")
+
+
+@router.message(Command("settings"))
+async def settings_command(message: types.Message) -> None:
+    """Показать настройки пользователя."""
+    user_id = message.from_user.id
+    logger.info(f"User {user_id} opened settings")
+
+    try:
+        if not db_manager:
+            await message.answer("⚠️ Настройки временно недоступны")
+            return
+
+        settings = await db_manager.get_user_settings(user_id)
+
+        # Создаем inline keyboard с настройками
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"🎬 Качество: {settings['default_quality']}",
+                    callback_data="settings_quality"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"📁 Формат: {settings['default_format'].upper()}",
+                    callback_data="settings_format"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"🗑️ Авто-удаление: {settings['auto_delete_after_days']} дн.",
+                    callback_data="settings_autodelete"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"🔔 Уведомления: {'✅' if settings['notifications_enabled'] else '❌'}",
+                    callback_data="settings_notifications"
+                )
+            ]
+        ])
+
+        text = (
+            "⚙️ <b>Настройки</b>\n\n"
+            f"🎬 <b>Качество по умолчанию:</b> {settings['default_quality']}\n"
+            f"📁 <b>Формат:</b> {settings['default_format'].upper()}\n"
+            f"🗑️ <b>Авто-удаление файлов:</b> через {settings['auto_delete_after_days']} дней\n"
+            f"🔔 <b>Уведомления:</b> {'включены' if settings['notifications_enabled'] else 'выключены'}\n\n"
+            "💡 Нажмите на параметр для изменения"
+        )
+
+        await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+    except Exception as e:
+        logger.error(f"Error in settings command: {e}")
+        await message.answer(f"❌ Ошибка: {safe_format_error(e)}")
 
 
 # ==================== АДМИНСКИЕ КОМАНДЫ ====================
@@ -912,3 +970,158 @@ async def admin_set_cookies_callback(callback: CallbackQuery) -> None:
         return
 
     await callback.answer("🍪 Используйте команду /setcookies для обновления cookies", show_alert=True)
+
+
+# ==================== НАСТРОЙКИ ПОЛЬЗОВАТЕЛЯ ====================
+
+@router.callback_query(lambda c: c.data == "settings_quality")
+async def settings_quality_callback(callback: CallbackQuery) -> None:
+    """Изменить качество по умолчанию."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="360p", callback_data="set_quality_360p")],
+        [InlineKeyboardButton(text="480p", callback_data="set_quality_480p")],
+        [InlineKeyboardButton(text="720p", callback_data="set_quality_720p")],
+        [InlineKeyboardButton(text="1080p (Premium)", callback_data="set_quality_1080p")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")]
+    ])
+
+    text = (
+        "🎬 <b>Выберите качество по умолчанию</b>\n\n"
+        "Это качество будет использоваться автоматически при скачивании YouTube видео.\n\n"
+        "💡 Для Instagram и TikTok всегда используется максимальное качество."
+    )
+
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("set_quality_"))
+async def set_quality_callback(callback: CallbackQuery) -> None:
+    """Установить качество."""
+    quality = callback.data.replace("set_quality_", "")
+    user_id = callback.from_user.id
+
+    # Проверяем Premium для 1080p
+    if quality == "1080p":
+        is_premium = await sheets_manager.is_user_premium(user_id)
+        if not is_premium:
+            await callback.answer(
+                "❌ Качество 1080p доступно только для Premium пользователей",
+                show_alert=True
+            )
+            return
+
+    if db_manager:
+        success = await db_manager.update_user_settings(user_id, default_quality=quality)
+        if success:
+            await callback.answer(f"✅ Качество изменено на {quality}")
+            # Возврат к настройкам
+            await settings_command(callback.message)
+        else:
+            await callback.answer("❌ Ошибка сохранения", show_alert=True)
+    else:
+        await callback.answer("❌ Настройки недоступны", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data == "settings_format")
+async def settings_format_callback(callback: CallbackQuery) -> None:
+    """Изменить формат по умолчанию."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="MP4 (рекомендуется)", callback_data="set_format_mp4")],
+        [InlineKeyboardButton(text="WebM", callback_data="set_format_webm")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")]
+    ])
+
+    text = (
+        "📁 <b>Выберите формат видео</b>\n\n"
+        "<b>MP4:</b> Универсальный формат, работает везде\n"
+        "<b>WebM:</b> Меньший размер, но не все плееры поддерживают\n\n"
+        "💡 Рекомендуем MP4 для совместимости"
+    )
+
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("set_format_"))
+async def set_format_callback(callback: CallbackQuery) -> None:
+    """Установить формат."""
+    format_type = callback.data.replace("set_format_", "")
+    user_id = callback.from_user.id
+
+    if db_manager:
+        success = await db_manager.update_user_settings(user_id, default_format=format_type)
+        if success:
+            await callback.answer(f"✅ Формат изменен на {format_type.upper()}")
+            await settings_command(callback.message)
+        else:
+            await callback.answer("❌ Ошибка сохранения", show_alert=True)
+    else:
+        await callback.answer("❌ Настройки недоступны", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data == "settings_autodelete")
+async def settings_autodelete_callback(callback: CallbackQuery) -> None:
+    """Изменить время авто-удаления."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="3 дня", callback_data="set_autodelete_3")],
+        [InlineKeyboardButton(text="7 дней", callback_data="set_autodelete_7")],
+        [InlineKeyboardButton(text="14 дней", callback_data="set_autodelete_14")],
+        [InlineKeyboardButton(text="30 дней", callback_data="set_autodelete_30")],
+        [InlineKeyboardButton(text="Никогда", callback_data="set_autodelete_999")],
+        [InlineKeyboardButton(text="« Назад", callback_data="back_to_settings")]
+    ])
+
+    text = (
+        "🗑️ <b>Авто-удаление файлов</b>\n\n"
+        "Через сколько дней удалять скачанные файлы с сервера?\n\n"
+        "💡 Это не влияет на вашу историю - только на файлы на сервере"
+    )
+
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("set_autodelete_"))
+async def set_autodelete_callback(callback: CallbackQuery) -> None:
+    """Установить время авто-удаления."""
+    days = int(callback.data.replace("set_autodelete_", ""))
+    user_id = callback.from_user.id
+
+    if db_manager:
+        success = await db_manager.update_user_settings(user_id, auto_delete_after_days=days)
+        if success:
+            days_text = "никогда" if days == 999 else f"через {days} дней"
+            await callback.answer(f"✅ Файлы будут удаляться {days_text}")
+            await settings_command(callback.message)
+        else:
+            await callback.answer("❌ Ошибка сохранения", show_alert=True)
+    else:
+        await callback.answer("❌ Настройки недоступны", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data == "settings_notifications")
+async def settings_notifications_callback(callback: CallbackQuery) -> None:
+    """Переключить уведомления."""
+    user_id = callback.from_user.id
+
+    if db_manager:
+        settings = await db_manager.get_user_settings(user_id)
+        new_value = not settings['notifications_enabled']
+
+        success = await db_manager.update_user_settings(user_id, notifications_enabled=new_value)
+        if success:
+            status = "включены" if new_value else "выключены"
+            await callback.answer(f"✅ Уведомления {status}")
+            await settings_command(callback.message)
+        else:
+            await callback.answer("❌ Ошибка сохранения", show_alert=True)
+    else:
+        await callback.answer("❌ Настройки недоступны", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data == "back_to_settings")
+async def back_to_settings_callback(callback: CallbackQuery) -> None:
+    """Вернуться к настройкам."""
+    await settings_command(callback.message)
+    await callback.answer()
