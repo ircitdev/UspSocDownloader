@@ -1,4 +1,6 @@
 """Handler for user and admin commands."""
+import os
+from datetime import datetime
 from aiogram import Router, types, Bot
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -161,6 +163,114 @@ async def platforms_command(message: types.Message) -> None:
     )
 
     await message.answer(text, parse_mode="HTML")
+
+
+@router.message(Command("history"))
+async def history_command(message: types.Message) -> None:
+    """Показать историю загрузок пользователя."""
+    user_id = message.from_user.id
+    logger.info(f"User {user_id} requested download history")
+
+    try:
+        db = get_db_manager()
+        if not db:
+            await message.answer("⚠️ История временно недоступна")
+            return
+
+        # Получаем последние 10 загрузок
+        history = await db.get_download_history(user_id, limit=10)
+
+        if not history:
+            text = (
+                "📂 <b>История загрузок</b>\n\n"
+                "История пуста. Скачайте что-нибудь!\n\n"
+                "💡 Просто отправьте ссылку на пост из Instagram, YouTube, TikTok или VK"
+            )
+            await message.answer(text, parse_mode="HTML")
+            return
+
+        # Эмодзи для платформ
+        platform_emoji = {
+            "Instagram": "📸",
+            "YouTube": "📺",
+            "TikTok": "🎵",
+            "VK": "🎬",
+            "Twitter": "🐦",
+            "X": "🐦"
+        }
+
+        # Формируем текст с историей
+        items = []
+        buttons = []
+
+        for i, item in enumerate(history[:10], 1):
+            emoji = platform_emoji.get(item['platform'], "📁")
+
+            # Дата в читаемом формате
+            try:
+                date = datetime.fromisoformat(item['download_date'])
+                date_str = date.strftime("%d.%m %H:%M")
+            except:
+                date_str = "недавно"
+
+            # Сокращаем название до 35 символов
+            title = (item['title'] or "Без названия")[:35]
+            if len(item['title'] or "") > 35:
+                title += "..."
+
+            # Размер файла
+            file_size = item['file_size'] or 0
+            size_mb = file_size / 1024 / 1024 if file_size > 0 else 0
+
+            # Формат строки
+            favorite_mark = "⭐ " if item['is_favorite'] else ""
+            items.append(
+                f"{i}. {emoji} {favorite_mark}<b>{title}</b>\n"
+                f"   {date_str} • {size_mb:.1f} MB"
+            )
+
+            # Кнопки для первых 5 элементов
+            if i <= 5:
+                row = []
+                row.append(InlineKeyboardButton(
+                    text=f"{i}. Скачать снова",
+                    callback_data=f"history_redownload_{item['id']}"
+                ))
+
+                # Кнопка избранного (добавить или удалить)
+                if item['is_favorite']:
+                    row.append(InlineKeyboardButton(
+                        text="💔",
+                        callback_data=f"history_unfavorite_{item['id']}"
+                    ))
+                else:
+                    row.append(InlineKeyboardButton(
+                        text="⭐",
+                        callback_data=f"history_favorite_{item['id']}"
+                    ))
+
+                buttons.append(row)
+
+        text = (
+            "📂 <b>История загрузок</b>\n\n" +
+            "\n\n".join(items)
+        )
+
+        # Добавляем кнопку "Показать больше" если есть больше 10 записей
+        total_count = len(history)
+        if total_count >= 10:
+            buttons.append([InlineKeyboardButton(
+                text="📊 Показать больше",
+                callback_data="history_show_more_10"
+            )])
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+
+        await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+    except Exception as e:
+        logger.error(f"Error in history command: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка: {safe_format_error(e)}")
 
 
 @router.message(Command("settings"))
@@ -1129,4 +1239,203 @@ async def settings_notifications_callback(callback: CallbackQuery) -> None:
 async def back_to_settings_callback(callback: CallbackQuery) -> None:
     """Вернуться к настройкам."""
     await settings_command(callback.message)
+    await callback.answer()
+
+
+# ==================== ИСТОРИЯ ЗАГРУЗОК ====================
+
+@router.callback_query(lambda c: c.data.startswith("history_redownload_"))
+async def history_redownload_callback(callback: CallbackQuery) -> None:
+    """Повторная загрузка из истории."""
+    try:
+        download_id = int(callback.data.split("_")[-1])
+        user_id = callback.from_user.id
+
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ История недоступна", show_alert=True)
+            return
+
+        # Получаем запись из истории
+        item = await db.get_download_by_id(download_id)
+
+        if not item or item['user_id'] != user_id:
+            await callback.answer("❌ Элемент не найден", show_alert=True)
+            return
+
+        # Проверяем, существует ли файл на диске
+        file_path = item.get('file_path')
+        if file_path and os.path.exists(file_path):
+            # Файл есть - отправляем из кэша
+            try:
+                # Определяем тип файла
+                if file_path.endswith(('.mp4', '.mov', '.avi', '.webm')):
+                    await callback.message.answer_video(
+                        types.FSInputFile(file_path),
+                        caption=f"📂 Из истории: {item['title'] or 'Видео'}"
+                    )
+                elif file_path.endswith(('.mp3', '.m4a', '.wav')):
+                    await callback.message.answer_audio(
+                        types.FSInputFile(file_path),
+                        caption=f"📂 Из истории: {item['title'] or 'Аудио'}"
+                    )
+                elif file_path.endswith(('.jpg', '.jpeg', '.png', '.webp')):
+                    await callback.message.answer_photo(
+                        types.FSInputFile(file_path),
+                        caption=f"📂 Из истории: {item['title'] or 'Фото'}"
+                    )
+                else:
+                    await callback.message.answer_document(
+                        types.FSInputFile(file_path),
+                        caption=f"📂 Из истории: {item['title'] or 'Файл'}"
+                    )
+
+                await callback.answer("✅ Отправлено из кэша")
+                logger.info(f"Resent from cache: {file_path}")
+            except Exception as e:
+                logger.error(f"Failed to resend file: {e}")
+                # Файл поврежден или недоступен - скачиваем заново
+                await callback.answer("⏳ Файл недоступен, скачиваю заново...")
+                await callback.message.answer(item['url'])
+        else:
+            # Файла нет - скачиваем заново, отправляя URL в обработчик
+            await callback.answer("⏳ Скачиваю заново...")
+            await callback.message.answer(item['url'])
+
+    except Exception as e:
+        logger.error(f"Error in redownload callback: {e}", exc_info=True)
+        await callback.answer(f"❌ Ошибка: {str(e)[:50]}", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("history_favorite_"))
+async def history_favorite_callback(callback: CallbackQuery) -> None:
+    """Добавить в избранное из истории."""
+    try:
+        download_id = int(callback.data.split("_")[-1])
+
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ Недоступно", show_alert=True)
+            return
+
+        success = await db.add_to_favorites(download_id)
+        if success:
+            await callback.answer("⭐ Добавлено в избранное")
+            # Обновляем сообщение
+            await history_command(callback.message)
+        else:
+            await callback.answer("❌ Ошибка", show_alert=True)
+
+    except Exception as e:
+        logger.error(f"Error adding to favorites: {e}")
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("history_unfavorite_"))
+async def history_unfavorite_callback(callback: CallbackQuery) -> None:
+    """Удалить из избранного."""
+    try:
+        download_id = int(callback.data.split("_")[-1])
+
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ Недоступно", show_alert=True)
+            return
+
+        success = await db.remove_from_favorites(download_id)
+        if success:
+            await callback.answer("💔 Удалено из избранного")
+            # Обновляем сообщение
+            await history_command(callback.message)
+        else:
+            await callback.answer("❌ Ошибка", show_alert=True)
+
+    except Exception as e:
+        logger.error(f"Error removing from favorites: {e}")
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("history_show_more_"))
+async def history_show_more_callback(callback: CallbackQuery) -> None:
+    """Показать больше записей истории."""
+    try:
+        offset = int(callback.data.split("_")[-1])
+        user_id = callback.from_user.id
+
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ История недоступна", show_alert=True)
+            return
+
+        # Получаем следующие 10 записей
+        history = await db.get_download_history(user_id, limit=10, offset=offset)
+
+        if not history:
+            await callback.answer("📭 Больше записей нет", show_alert=True)
+            return
+
+        platform_emoji = {
+            "Instagram": "📸",
+            "YouTube": "📺",
+            "TikTok": "🎵",
+            "VK": "🎬",
+            "Twitter": "🐦",
+            "X": "🐦"
+        }
+
+        items = []
+        for i, item in enumerate(history, offset + 1):
+            emoji = platform_emoji.get(item['platform'], "📁")
+
+            try:
+                date = datetime.fromisoformat(item['download_date'])
+                date_str = date.strftime("%d.%m %H:%M")
+            except:
+                date_str = "недавно"
+
+            title = (item['title'] or "Без названия")[:35]
+            if len(item['title'] or "") > 35:
+                title += "..."
+
+            file_size = item['file_size'] or 0
+            size_mb = file_size / 1024 / 1024 if file_size > 0 else 0
+
+            favorite_mark = "⭐ " if item['is_favorite'] else ""
+            items.append(
+                f"{i}. {emoji} {favorite_mark}<b>{title}</b>\n"
+                f"   {date_str} • {size_mb:.1f} MB"
+            )
+
+        text = (
+            f"📂 <b>История загрузок (записи {offset + 1}-{offset + len(history)})</b>\n\n" +
+            "\n\n".join(items)
+        )
+
+        # Кнопка "Показать еще" если есть больше записей
+        buttons = []
+        if len(history) >= 10:
+            buttons.append([InlineKeyboardButton(
+                text="📊 Показать еще",
+                callback_data=f"history_show_more_{offset + 10}"
+            )])
+
+        buttons.append([InlineKeyboardButton(
+            text="« Назад к началу",
+            callback_data="show_history"
+        )])
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"Error showing more history: {e}", exc_info=True)
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data == "show_history")
+async def show_history_callback(callback: CallbackQuery) -> None:
+    """Показать историю (callback для главного меню)."""
+    await history_command(callback.message)
     await callback.answer()

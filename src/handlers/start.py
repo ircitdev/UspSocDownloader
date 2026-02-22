@@ -76,7 +76,11 @@ async def start_command(message: types.Message) -> None:
                     InlineKeyboardButton(text="💎 Premium", callback_data="show_premium")
                 ],
                 [
-                    InlineKeyboardButton(text="⚙️ Админ-панель", callback_data="admin_panel")
+                    InlineKeyboardButton(text="📂 История", callback_data="show_history"),
+                    InlineKeyboardButton(text="⚙️ Настройки", callback_data="show_settings")
+                ],
+                [
+                    InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin_panel")
                 ],
                 [
                     InlineKeyboardButton(text="📤 Поделиться ботом", switch_inline_query="Качай видео с Instagram, TikTok, YouTube!")
@@ -87,6 +91,10 @@ async def start_command(message: types.Message) -> None:
                 [
                     InlineKeyboardButton(text="🌐 Платформы", callback_data="show_platforms"),
                     InlineKeyboardButton(text="💎 Premium", callback_data="show_premium")
+                ],
+                [
+                    InlineKeyboardButton(text="📂 История", callback_data="show_history"),
+                    InlineKeyboardButton(text="⚙️ Настройки", callback_data="show_settings")
                 ],
                 [
                     InlineKeyboardButton(text="📤 Поделиться ботом", switch_inline_query="Качай видео с Instagram, TikTok, YouTube!")
@@ -104,3 +112,11 @@ async def start_command(message: types.Message) -> None:
             await message.answer(START_WELCOME, parse_mode="HTML")
         except:
             await message.answer("❌ Произошла ошибка. Попробуйте позже.")
+
+
+@router.callback_query(lambda c: c.data == "show_settings")
+async def show_settings_callback(callback: CallbackQuery) -> None:
+    """Показать настройки через callback."""
+    from src.handlers.commands import settings_command
+    await settings_command(callback.message)
+    await callback.answer()
