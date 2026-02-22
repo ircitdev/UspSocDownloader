@@ -41,9 +41,9 @@ async def main():
         # Register routers
         dp.include_router(start.router)
         dp.include_router(help_handler.router)
-        dp.include_router(url_handler.router)
         dp.include_router(commands.router)
-        logger.info("Routers registered: start, help, url_handler")
+        dp.include_router(url_handler.router)
+        logger.info("Routers registered: start, help, commands, url_handler")
 
         # Cleanup old files on startup (keep for 1 day)
         media_downloader.cleanup_old_files(days=1)
