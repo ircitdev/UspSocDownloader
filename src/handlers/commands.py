@@ -11,9 +11,13 @@ from src.config import config
 from src.database.db_manager import get_db_manager
 from src.utils.rate_limiter import rate_limiter
 from src.utils.history_exporter import export_user_history, HistoryExporter
+from src.utils.history_search import HistorySearcher
 
 logger = get_logger(__name__)
 router = Router()
+
+# State для поиска
+search_state = {}
 
 
 def is_admin(user_id: int) -> bool:
@@ -474,11 +478,17 @@ async def history_command(message: types.Message) -> None:
                 callback_data="history_show_more_10"
             )])
 
-        # Добавляем кнопку экспорта
-        buttons.append([InlineKeyboardButton(
-            text="📤 Экспортировать историю",
-            callback_data="export_menu_from_history"
-        )])
+        # Добавляем кнопки поиска и экспорта
+        buttons.append([
+            InlineKeyboardButton(
+                text="🔍 Поиск",
+                callback_data="open_search"
+            ),
+            InlineKeyboardButton(
+                text="📤 Экспорт",
+                callback_data="export_menu_from_history"
+            )
+        ])
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
 
@@ -2916,4 +2926,340 @@ async def export_back_callback(callback: CallbackQuery) -> None:
 async def export_menu_from_history_callback(callback: CallbackQuery) -> None:
     """Открыть меню экспорта из истории."""
     await export_command(callback.message)
+    await callback.answer()
+
+
+@router.message(Command("search"))
+async def search_command(message: types.Message) -> None:
+    """Поиск по истории загрузок."""
+    user_id = message.from_user.id
+    logger.info(f"User {user_id} opened search menu")
+
+    try:
+        db = get_db_manager()
+        if not db:
+            await message.answer("⚠️ Поиск временно недоступен")
+            return
+
+        # Проверяем наличие истории
+        history = await db.get_download_history(user_id, limit=1)
+        if not history:
+            await message.answer(
+                "🔍 <b>Поиск по истории</b>\n\n"
+                "У вас пока нет загрузок для поиска.\n"
+                "Скачайте что-нибудь и попробуйте снова!",
+                parse_mode="HTML"
+            )
+            return
+
+        # Получаем подсказки для поиска
+        suggestions = await HistorySearcher.get_search_suggestions(user_id)
+
+        text = (
+            "🔍 <b>Поиск по истории загрузок</b>\n\n"
+            f"📊 Всего загрузок: {suggestions.get('total_downloads', 0)}\n\n"
+            "Выберите способ поиска или отправьте текст для поиска:"
+        )
+
+        # Кнопки быстрого поиска
+        buttons = []
+
+        # Поиск по платформам
+        if suggestions.get('platforms'):
+            buttons.append([InlineKeyboardButton(
+                text="📱 По платформе",
+                callback_data="search_by_platform"
+            )])
+
+        # Поиск по датам
+        buttons.append([
+            InlineKeyboardButton(
+                text="📅 За последние 7 дней",
+                callback_data="search_date_7"
+            )
+        ])
+        buttons.append([
+            InlineKeyboardButton(
+                text="📅 За последний месяц",
+                callback_data="search_date_30"
+            )
+        ])
+
+        # Поиск по типу контента
+        buttons.append([InlineKeyboardButton(
+            text="🎬 По типу контента",
+            callback_data="search_by_type"
+        )])
+
+        # Популярные авторы (если есть)
+        if suggestions.get('authors'):
+            buttons.append([InlineKeyboardButton(
+                text="👤 По автору",
+                callback_data="search_by_author"
+            )])
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+        # Активируем режим поиска
+        search_state[user_id] = {
+            'active': True,
+            'suggestions': suggestions
+        }
+
+        await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+    except Exception as e:
+        logger.error(f"Error in search command: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка: {safe_format_error(e)}")
+
+
+# Обработчик текстового поиска
+@router.message(lambda msg: msg.from_user.id in search_state and
+                search_state.get(msg.from_user.id, {}).get('active') and
+                not msg.text.startswith('/'))
+async def handle_search_query(message: types.Message) -> None:
+    """Обработать текстовый поисковый запрос."""
+    user_id = message.from_user.id
+    query = message.text
+
+    logger.info(f"User {user_id} searching: '{query}'")
+
+    try:
+        # Выполняем поиск
+        progress_msg = await message.answer(
+            f"🔍 Ищу \"{query}\"...",
+            parse_mode="HTML"
+        )
+
+        results = await HistorySearcher.search(
+            user_id=user_id,
+            query=query,
+            limit=50
+        )
+
+        # Форматируем результаты
+        text = HistorySearcher.format_search_results(results, query)
+
+        # Кнопки для результатов
+        buttons = []
+
+        if results:
+            # Кнопки для первых результатов
+            for i, item in enumerate(results[:5], 1):
+                buttons.append([
+                    InlineKeyboardButton(
+                        text=f"{i}. Скачать снова",
+                        callback_data=f"history_redownload_{item['id']}"
+                    ),
+                    InlineKeyboardButton(
+                        text="⭐" if not item.get('is_favorite') else "💔",
+                        callback_data=f"history_{'favorite' if not item.get('is_favorite') else 'unfavorite'}_{item['id']}"
+                    )
+                ])
+
+        # Кнопка новый поиск
+        buttons.append([InlineKeyboardButton(
+            text="🔍 Новый поиск",
+            callback_data="search_new"
+        )])
+
+        # Кнопка экспорта результатов (если есть)
+        if len(results) > 0:
+            buttons.append([InlineKeyboardButton(
+                text="📤 Экспортировать результаты",
+                callback_data=f"search_export_{query}"
+            )])
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+        await progress_msg.delete()
+        await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+        # Деактивируем режим поиска после результата
+        search_state[user_id]['active'] = False
+
+    except Exception as e:
+        logger.error(f"Error in search query: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка поиска: {safe_format_error(e)}")
+
+
+@router.callback_query(lambda c: c.data.startswith("search_"))
+async def search_callback(callback: CallbackQuery) -> None:
+    """Обработать callback для поиска."""
+    user_id = callback.from_user.id
+    data = callback.data
+
+    try:
+        # Новый поиск
+        if data == "search_new":
+            await search_command(callback.message)
+            await callback.answer()
+            return
+
+        # Поиск по дате
+        if data.startswith("search_date_"):
+            days = int(data.replace("search_date_", ""))
+            await callback.answer(f"⏳ Поиск за последние {days} дней...")
+
+            results = await HistorySearcher.search_by_date_range(
+                user_id=user_id,
+                days=days,
+                limit=50
+            )
+
+            text = HistorySearcher.format_search_results(
+                results,
+                query=f"Последние {days} дней"
+            )
+
+            buttons = []
+            if results:
+                for i, item in enumerate(results[:5], 1):
+                    buttons.append([
+                        InlineKeyboardButton(
+                            text=f"{i}. Скачать снова",
+                            callback_data=f"history_redownload_{item['id']}"
+                        )
+                    ])
+
+            buttons.append([InlineKeyboardButton(
+                text="🔍 Новый поиск",
+                callback_data="search_new"
+            )])
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+            return
+
+        # Поиск по платформе
+        if data == "search_by_platform":
+            # Показываем меню платформ
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="📸 Instagram", callback_data="search_platform_instagram"),
+                    InlineKeyboardButton(text="📺 YouTube", callback_data="search_platform_youtube")
+                ],
+                [
+                    InlineKeyboardButton(text="🎵 TikTok", callback_data="search_platform_tiktok"),
+                    InlineKeyboardButton(text="🐦 Twitter", callback_data="search_platform_twitter")
+                ],
+                [
+                    InlineKeyboardButton(text="🎬 VK", callback_data="search_platform_vk")
+                ],
+                [
+                    InlineKeyboardButton(text="◀️ Назад", callback_data="search_new")
+                ]
+            ])
+
+            await callback.message.edit_text(
+                "📱 <b>Выберите платформу:</b>",
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+            await callback.answer()
+            return
+
+        # Поиск конкретной платформы
+        if data.startswith("search_platform_"):
+            platform = data.replace("search_platform_", "")
+            await callback.answer(f"⏳ Ищу в {platform.capitalize()}...")
+
+            results = await HistorySearcher.search(
+                user_id=user_id,
+                platform=platform,
+                limit=50
+            )
+
+            text = HistorySearcher.format_search_results(
+                results,
+                query=f"Платформа: {platform.capitalize()}"
+            )
+
+            buttons = []
+            if results:
+                for i, item in enumerate(results[:5], 1):
+                    buttons.append([
+                        InlineKeyboardButton(
+                            text=f"{i}. Скачать снова",
+                            callback_data=f"history_redownload_{item['id']}"
+                        )
+                    ])
+
+            buttons.append([InlineKeyboardButton(
+                text="🔍 Новый поиск",
+                callback_data="search_new"
+            )])
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+            return
+
+        # Поиск по типу контента
+        if data == "search_by_type":
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="🎬 Видео", callback_data="search_type_video"),
+                    InlineKeyboardButton(text="📷 Фото", callback_data="search_type_photo")
+                ],
+                [
+                    InlineKeyboardButton(text="🎵 Аудио", callback_data="search_type_audio"),
+                    InlineKeyboardButton(text="📸 Карусель", callback_data="search_type_carousel")
+                ],
+                [
+                    InlineKeyboardButton(text="◀️ Назад", callback_data="search_new")
+                ]
+            ])
+
+            await callback.message.edit_text(
+                "🎬 <b>Выберите тип контента:</b>",
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+            await callback.answer()
+            return
+
+        # Поиск конкретного типа
+        if data.startswith("search_type_"):
+            content_type = data.replace("search_type_", "")
+            await callback.answer(f"⏳ Ищу {content_type}...")
+
+            results = await HistorySearcher.search(
+                user_id=user_id,
+                content_type=content_type,
+                limit=50
+            )
+
+            text = HistorySearcher.format_search_results(
+                results,
+                query=f"Тип: {content_type.capitalize()}"
+            )
+
+            buttons = []
+            if results:
+                for i, item in enumerate(results[:5], 1):
+                    buttons.append([
+                        InlineKeyboardButton(
+                            text=f"{i}. Скачать снова",
+                            callback_data=f"history_redownload_{item['id']}"
+                        )
+                    ])
+
+            buttons.append([InlineKeyboardButton(
+                text="🔍 Новый поиск",
+                callback_data="search_new"
+            )])
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+            return
+
+    except Exception as e:
+        logger.error(f"Error in search callback: {e}", exc_info=True)
+        await callback.answer(f"❌ Ошибка: {safe_format_error(e, 50)}", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data == "open_search")
+async def open_search_callback(callback: CallbackQuery) -> None:
+    """Открыть поиск из истории."""
+    await search_command(callback.message)
     await callback.answer()
