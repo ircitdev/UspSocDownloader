@@ -10,6 +10,7 @@ from src.utils.sheets import sheets_manager
 from src.downloaders.media_downloader import media_downloader
 from src.utils.instagram_health import instagram_health
 from src.database.db_manager import init_database
+from src.utils.file_cleaner import init_cleanup_service
 
 logger = get_logger(__name__)
 
@@ -36,6 +37,11 @@ async def main():
         instagram_health.set_bot(bot)
         instagram_health.start()
         logger.info("Instagram health checker started (12h interval)")
+
+        # Initialize file cleanup service
+        cleanup_service = init_cleanup_service(cleanup_interval_hours=6)
+        await cleanup_service.start()
+        logger.info("File cleanup service started (6h interval)")
 
         # Initialize Google Sheets connection
         if await sheets_manager.init():
@@ -72,10 +78,12 @@ async def main():
 
         logger.info("Starting bot polling...")
         await dp.start_polling(bot)
-        
+
         # Cancel cleanup task on shutdown
         cleanup_task.cancel()
         instagram_health.stop()
+        await cleanup_service.stop()
+        logger.info("File cleanup service stopped")
 
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)

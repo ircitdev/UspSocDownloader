@@ -34,6 +34,8 @@ async def setup_bot_commands(bot: Bot) -> None:
         BotCommand(command="broadcast", description="📢 Рассылка всем"),
         BotCommand(command="allstats", description="📈 Общая статистика"),
         BotCommand(command="users", description="👥 Список пользователей"),
+        BotCommand(command="cleanup", description="🗑️ Управление очисткой файлов"),
+        BotCommand(command="ratelimit", description="⏱️ Rate limiter статистика"),
     ]
     
     # Устанавливаем команды для всех

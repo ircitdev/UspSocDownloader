@@ -255,6 +255,29 @@ class DatabaseManager:
             return None
 
     @async_db_operation
+    def get_all_user_ids(self) -> List[int]:
+        """Get all unique user IDs from user_settings table.
+
+        Returns:
+            List of user IDs
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT user_id FROM user_settings")
+            rows = cursor.fetchall()
+
+            user_ids = [row[0] for row in rows]
+            conn.close()
+
+            return user_ids
+
+        except Exception as e:
+            logger.error(f"Failed to get user IDs: {e}")
+            return []
+
+    @async_db_operation
     def get_download_history(
         self,
         user_id: int,

@@ -50,6 +50,15 @@ Telegram-бот для скачивания видео, фото и карусе
 | Рерайт | 3 стиля: экспертный, юмористический, дружелюбный | gpt-4o-mini |
 | OCR | Извлечение текста с изображений | gpt-4o (vision) |
 
+### Пользовательские функции
+
+- **📂 История загрузок** - Сохранение всех загрузок с возможностью повторного скачивания
+- **⭐ Избранное** - Отметка любимых загрузок для быстрого доступа
+- **📁 Коллекции** - Организация загрузок по тематическим коллекциям
+- **⚙️ Настройки** - Персональные настройки качества, формата, авто-удаления
+- **📊 Статистика** - Детальная статистика использования бота
+- **🗑️ Авто-очистка** - Автоматическое удаление старых файлов по расписанию
+
 ### Админ-панель
 
 - Интерактивное меню с кнопками быстрого доступа
@@ -88,7 +97,13 @@ UspSocDownloader/
 │   │   ├── translator.py       # OpenAI: translate, rewrite, OCR
 │   │   ├── text_helpers.py     # Safe text formatting
 │   │   ├── sheets.py           # Google Sheets integration
-│   │   └── notifications.py    # Telegram notifications
+│   │   ├── notifications.py    # Telegram notifications
+│   │   ├── rate_limiter.py     # Rate limiting for platforms
+│   │   ├── error_messages.py   # User-friendly error messages
+│   │   └── file_cleaner.py     # Automatic file cleanup service
+│   │
+│   ├── database/
+│   │   └── db_manager.py       # SQLite database manager
 │   │
 │   └── localization/
 │       └── messages.py         # UI messages (Russian)

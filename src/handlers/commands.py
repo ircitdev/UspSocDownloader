@@ -2494,3 +2494,195 @@ async def ratelimit_reset_callback(callback: CallbackQuery) -> None:
     rate_limiter.reset_stats()
     await callback.answer("✅ Статистика сброшена")
     await callback.message.answer("✅ Статистика rate limiter сброшена")
+
+
+@router.message(Command("cleanup"))
+async def cleanup_command(message: types.Message) -> None:
+    """Управление автоматической очисткой файлов (admin only)."""
+    user_id = message.from_user.id
+
+    if not is_admin(user_id):
+        await message.answer("❌ Эта команда доступна только администратору")
+        return
+
+    logger.info(f"Admin {user_id} opened cleanup menu")
+
+    from src.utils.file_cleaner import get_cleanup_service
+
+    cleanup_service = get_cleanup_service()
+    if not cleanup_service:
+        await message.answer("❌ Сервис очистки не инициализирован")
+        return
+
+    try:
+        stats = cleanup_service.get_stats()
+
+        text = (
+            "🗑️ <b>Автоматическая очистка файлов</b>\n\n"
+            f"📊 <b>Статус:</b> {'✅ Запущен' if stats['is_running'] else '❌ Остановлен'}\n"
+            f"⏱️ <b>Интервал:</b> каждые {stats['cleanup_interval_hours']} ч\n"
+            f"🔄 <b>Циклов выполнено:</b> {stats['total_cleanup_runs']}\n"
+            f"📁 <b>Файлов удалено:</b> {stats['total_files_deleted']}\n"
+            f"💾 <b>Места освобождено:</b> {stats['total_space_freed_mb']:.2f} MB\n"
+        )
+
+        if stats['last_cleanup_time']:
+            from datetime import datetime
+            last_time = datetime.fromisoformat(stats['last_cleanup_time'])
+            text += f"🕐 <b>Последняя очистка:</b> {last_time.strftime('%d.%m %H:%M')}\n"
+
+        text += (
+            "\n<b>Как работает:</b>\n"
+            "• Проверяет настройку пользователя 'Авто-удаление'\n"
+            "• Удаляет файлы старше указанного срока\n"
+            "• Не удаляет избранные файлы (⭐)\n"
+            "• Сохраняет записи в истории\n\n"
+            "💡 Пользователи управляют сроком через /settings"
+        )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🧹 Запустить вручную (все)",
+                    callback_data="cleanup_manual_all"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📊 Подробная статистика",
+                    callback_data="cleanup_stats"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔄 Обновить",
+                    callback_data="cleanup_refresh"
+                )
+            ]
+        ])
+
+        await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+    except Exception as e:
+        logger.error(f"Error in cleanup command: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка: {safe_format_error(e)}")
+
+
+@router.callback_query(lambda c: c.data == "cleanup_manual_all")
+async def cleanup_manual_all_callback(callback: CallbackQuery) -> None:
+    """Запустить ручную очистку для всех пользователей."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    from src.utils.file_cleaner import get_cleanup_service
+
+    cleanup_service = get_cleanup_service()
+    if not cleanup_service:
+        await callback.answer("❌ Сервис недоступен", show_alert=True)
+        return
+
+    try:
+        await callback.answer("⏳ Запускаю очистку...")
+
+        # Показываем прогресс
+        progress_msg = await callback.message.answer(
+            "🧹 <b>Запуск ручной очистки...</b>\n\n"
+            "⏳ Сканирую файлы пользователей...",
+            parse_mode="HTML"
+        )
+
+        # Запускаем очистку
+        result = await cleanup_service.manual_cleanup()
+
+        if 'error' in result:
+            await progress_msg.edit_text(
+                f"❌ <b>Ошибка:</b>\n{result['error']}",
+                parse_mode="HTML"
+            )
+            return
+
+        # Показываем результат
+        text = (
+            "✅ <b>Очистка завершена!</b>\n\n"
+            f"👥 <b>Пользователей обработано:</b> {result['users_cleaned']}\n"
+            f"📁 <b>Файлов удалено:</b> {result['files_deleted']}\n"
+            f"💾 <b>Места освобождено:</b> {result['space_freed_mb']:.2f} MB"
+        )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="cleanup_refresh")]
+        ])
+
+        await progress_msg.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+    except Exception as e:
+        logger.error(f"Error in manual cleanup: {e}", exc_info=True)
+        await callback.answer(f"❌ Ошибка: {safe_format_error(e, 50)}", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data == "cleanup_stats")
+async def cleanup_stats_callback(callback: CallbackQuery) -> None:
+    """Показать подробную статистику очистки."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    from src.utils.file_cleaner import get_cleanup_service
+
+    cleanup_service = get_cleanup_service()
+    if not cleanup_service:
+        await callback.answer("❌ Сервис недоступен", show_alert=True)
+        return
+
+    try:
+        stats = cleanup_service.get_stats()
+
+        text = (
+            "📊 <b>Подробная статистика очистки</b>\n\n"
+            f"🔄 <b>Всего циклов:</b> {stats['total_cleanup_runs']}\n"
+            f"📁 <b>Всего файлов удалено:</b> {stats['total_files_deleted']}\n"
+            f"💾 <b>Всего места освобождено:</b> {stats['total_space_freed_mb']:.2f} MB\n\n"
+        )
+
+        if stats['total_cleanup_runs'] > 0:
+            avg_files = stats['total_files_deleted'] / stats['total_cleanup_runs']
+            avg_space = stats['total_space_freed_mb'] / stats['total_cleanup_runs']
+            text += (
+                f"📈 <b>Среднее за цикл:</b>\n"
+                f"• Файлов: {avg_files:.1f}\n"
+                f"• Места: {avg_space:.2f} MB\n\n"
+            )
+
+        text += (
+            f"⏱️ <b>Интервал:</b> {stats['cleanup_interval_hours']} часов\n"
+            f"📊 <b>Статус:</b> {'✅ Активен' if stats['is_running'] else '❌ Остановлен'}\n"
+        )
+
+        if stats['last_cleanup_time']:
+            from datetime import datetime
+            last_time = datetime.fromisoformat(stats['last_cleanup_time'])
+            text += f"\n🕐 <b>Последняя очистка:</b>\n{last_time.strftime('%d.%m.%Y %H:%M:%S')}"
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="cleanup_refresh")]
+        ])
+
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"Error in cleanup stats: {e}", exc_info=True)
+        await callback.answer(f"❌ Ошибка: {safe_format_error(e, 50)}", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data == "cleanup_refresh")
+async def cleanup_refresh_callback(callback: CallbackQuery) -> None:
+    """Обновить информацию об очистке."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    # Вызываем основную команду заново
+    await cleanup_command(callback.message)
+    await callback.answer("✅ Обновлено")
