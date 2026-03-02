@@ -144,13 +144,21 @@ async def test_create_test_data():
 
 async def main():
     """Main test function."""
-    choice = input("\nChoose test:\n1. Test cleanup service\n2. Create test data\n3. Both\n\nChoice (1-3): ")
+    import sys
+
+    if len(sys.argv) > 1:
+        choice = sys.argv[1]
+    else:
+        try:
+            choice = input("\nChoose test:\n1. Test cleanup service\n2. Create test data\n3. Both\n\nChoice (1-3): ")
+        except EOFError:
+            choice = "1"  # Default to test cleanup
 
     if choice == "2":
         await test_create_test_data()
     elif choice == "3":
         await test_create_test_data()
-        input("\nPress Enter to continue with cleanup test...")
+        print("\nContinuing with cleanup test...")
         await test_cleanup_service()
     else:
         await test_cleanup_service()

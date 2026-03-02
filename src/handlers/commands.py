@@ -10,6 +10,7 @@ from src.utils.text_helpers import safe_format_error
 from src.config import config
 from src.database.db_manager import get_db_manager
 from src.utils.rate_limiter import rate_limiter
+from src.utils.history_exporter import export_user_history, HistoryExporter
 
 logger = get_logger(__name__)
 router = Router()
@@ -472,6 +473,12 @@ async def history_command(message: types.Message) -> None:
                 text="📊 Показать больше",
                 callback_data="history_show_more_10"
             )])
+
+        # Добавляем кнопку экспорта
+        buttons.append([InlineKeyboardButton(
+            text="📤 Экспортировать историю",
+            callback_data="export_menu_from_history"
+        )])
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
 
@@ -2686,3 +2693,227 @@ async def cleanup_refresh_callback(callback: CallbackQuery) -> None:
     # Вызываем основную команду заново
     await cleanup_command(callback.message)
     await callback.answer("✅ Обновлено")
+
+
+@router.message(Command("export"))
+async def export_command(message: types.Message) -> None:
+    """Экспорт истории загрузок в CSV/JSON."""
+    user_id = message.from_user.id
+    logger.info(f"User {user_id} opened export menu")
+
+    try:
+        db = get_db_manager()
+        if not db:
+            await message.answer("⚠️ Экспорт временно недоступен")
+            return
+
+        # Проверяем наличие истории
+        history = await db.get_download_history(user_id, limit=1)
+        if not history:
+            await message.answer(
+                "📂 <b>Экспорт истории</b>\n\n"
+                "У вас пока нет загрузок для экспорта.\n"
+                "Скачайте что-нибудь и попробуйте снова!",
+                parse_mode="HTML"
+            )
+            return
+
+        # Показываем меню выбора формата
+        text = (
+            "📤 <b>Экспорт истории загрузок</b>\n\n"
+            "Выберите формат для экспорта:\n\n"
+            "📊 <b>CSV</b> - табличный формат (Excel, Google Sheets)\n"
+            "📋 <b>JSON</b> - структурированный формат (программирование)\n\n"
+            "💡 Экспорт включает:\n"
+            "• Дата и время загрузки\n"
+            "• Платформа и тип контента\n"
+            "• Название и автор\n"
+            "• Ссылка на оригинал\n"
+            "• Размер файла\n"
+            "• Избранное"
+        )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📊 CSV (Excel)",
+                    callback_data="export_csv_all"
+                ),
+                InlineKeyboardButton(
+                    text="📋 JSON",
+                    callback_data="export_json_all"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⭐ Только избранное (CSV)",
+                    callback_data="export_csv_favorites"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⭐ Только избранное (JSON)",
+                    callback_data="export_json_favorites"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📊 По платформам",
+                    callback_data="export_by_platform"
+                )
+            ]
+        ])
+
+        await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+    except Exception as e:
+        logger.error(f"Error in export command: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка: {safe_format_error(e)}")
+
+
+@router.callback_query(lambda c: c.data.startswith("export_"))
+async def export_callback(callback: CallbackQuery) -> None:
+    """Обработать экспорт в выбранном формате."""
+    user_id = callback.from_user.id
+    data = callback.data
+
+    try:
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ Недоступно", show_alert=True)
+            return
+
+        # Показываем прогресс
+        await callback.answer("⏳ Готовлю экспорт...")
+
+        progress_msg = await callback.message.answer(
+            "📤 <b>Подготовка экспорта...</b>\n\n"
+            "⏳ Загружаю данные из базы...",
+            parse_mode="HTML"
+        )
+
+        # Определяем параметры экспорта
+        format_type = 'csv' if 'csv' in data else 'json'
+        favorites_only = 'favorites' in data
+        platform = None
+
+        # Специальная обработка для экспорта по платформам
+        if data == "export_by_platform":
+            # Показываем меню выбора платформы
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="📸 Instagram", callback_data="export_platform_instagram"),
+                    InlineKeyboardButton(text="📺 YouTube", callback_data="export_platform_youtube")
+                ],
+                [
+                    InlineKeyboardButton(text="🎵 TikTok", callback_data="export_platform_tiktok"),
+                    InlineKeyboardButton(text="🐦 Twitter", callback_data="export_platform_twitter")
+                ],
+                [
+                    InlineKeyboardButton(text="◀️ Назад", callback_data="export_back")
+                ]
+            ])
+
+            await progress_msg.edit_text(
+                "📊 <b>Выберите платформу для экспорта:</b>",
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+            return
+
+        # Обработка экспорта по платформе
+        if data.startswith("export_platform_"):
+            platform = data.replace("export_platform_", "")
+            format_type = 'csv'  # По умолчанию CSV для платформ
+
+        # Выполняем экспорт
+        content, stats = await export_user_history(
+            db=db,
+            user_id=user_id,
+            format_type=format_type,
+            platform=platform,
+            favorites_only=favorites_only
+        )
+
+        # Обновляем прогресс
+        await progress_msg.edit_text(
+            "📤 <b>Создаю файл...</b>\n\n"
+            f"📊 Записей: {stats['total_downloads']}\n"
+            f"💾 Размер: {stats['total_size_mb']:.2f} MB",
+            parse_mode="HTML"
+        )
+
+        # Сохраняем во временный файл
+        exporter = HistoryExporter()
+        filename = exporter.generate_filename(user_id, format_type)
+        file_path = config.DATA_DIR / "exports" / filename
+
+        if exporter.save_to_file(content, file_path):
+            # Отправляем файл
+            from aiogram.types import FSInputFile
+
+            caption = (
+                f"📤 <b>Экспорт истории загрузок</b>\n\n"
+                f"📊 Всего записей: {stats['total_downloads']}\n"
+                f"💾 Общий размер: {stats['total_size_mb']:.2f} MB\n"
+            )
+
+            if stats.get('favorites') and favorites_only:
+                caption += f"⭐ Избранных: {stats['favorites']}\n"
+
+            if platform:
+                caption += f"📱 Платформа: {platform.capitalize()}\n"
+
+            if stats.get('platforms'):
+                caption += f"\n📈 По платформам:\n"
+                for plat, count in stats['platforms'].items():
+                    caption += f"  • {plat}: {count}\n"
+
+            if stats.get('date_range'):
+                dr = stats['date_range']
+                caption += f"\n📅 Период: {dr['first']} — {dr['last']}"
+
+            await callback.message.answer_document(
+                document=FSInputFile(file_path),
+                caption=caption,
+                parse_mode="HTML"
+            )
+
+            # Удаляем прогресс-сообщение
+            await progress_msg.delete()
+
+            # Удаляем временный файл
+            try:
+                file_path.unlink()
+            except Exception:
+                pass
+
+            logger.info(
+                f"Exported history for user {user_id}: "
+                f"{format_type}, {stats['total_downloads']} records"
+            )
+
+        else:
+            await progress_msg.edit_text(
+                "❌ <b>Ошибка создания файла</b>\n\n"
+                "Попробуйте позже",
+                parse_mode="HTML"
+            )
+
+    except Exception as e:
+        logger.error(f"Error in export callback: {e}", exc_info=True)
+        await callback.answer(f"❌ Ошибка: {safe_format_error(e, 50)}", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data == "export_back")
+async def export_back_callback(callback: CallbackQuery) -> None:
+    """Вернуться к меню экспорта."""
+    await export_command(callback.message)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "export_menu_from_history")
+async def export_menu_from_history_callback(callback: CallbackQuery) -> None:
+    """Открыть меню экспорта из истории."""
+    await export_command(callback.message)
+    await callback.answer()

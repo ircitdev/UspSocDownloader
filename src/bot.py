@@ -22,6 +22,7 @@ async def setup_bot_commands(bot: Bot) -> None:
         BotCommand(command="history", description="📂 История загрузок"),
         BotCommand(command="favorites", description="⭐ Избранное"),
         BotCommand(command="collections", description="📁 Коллекции"),
+        BotCommand(command="export", description="📤 Экспорт истории (CSV/JSON)"),
         BotCommand(command="stats", description="📊 Моя статистика"),
         BotCommand(command="mystats", description="📈 Детальная статистика"),
         BotCommand(command="settings", description="⚙️ Настройки"),
