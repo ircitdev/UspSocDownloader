@@ -19,6 +19,7 @@ async def setup_bot_commands(bot: Bot) -> None:
     user_commands = [
         BotCommand(command="start", description="🚀 Запустить бота"),
         BotCommand(command="help", description="❓ Справка по боту"),
+        BotCommand(command="howto", description="📖 Интерактивное руководство"),
         BotCommand(command="history", description="📂 История загрузок"),
         BotCommand(command="search", description="🔍 Поиск по истории"),
         BotCommand(command="favorites", description="⭐ Избранное"),

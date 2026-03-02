@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>UspSocDownloader - Руководство</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- Telegram Web App SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <style>
+        :root {
+            --primary-dark: #0f1729;
+            --primary-blue: #1a2642;
+            --accent-blue: #4a9eff;
+            --accent-light: #6bb3ff;
+            --text-primary: #ffffff;
+            --text-secondary: #b8c5d6;
+            --glass-bg: rgba(26, 38, 66, 0.7);
+            --glass-border: rgba(74, 158, 255, 0.2);
+            --shadow: rgba(0, 0, 0, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary-blue) 100%);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Background decoration */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(74, 158, 255, 0.1) 0%, transparent 70%);
+            animation: pulse 15s ease-in-out infinite;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1) rotate(0deg); }
+            50% { transform: scale(1.1) rotate(180deg); }
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        header {
+            text-align: center;
+            padding: 40px 0 30px;
+            animation: fadeInDown 0.8s ease;
+        }
+
+        .logo {
+            font-family: 'Montserrat', sans-serif;
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-light) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: var(--text-secondary);
+            font-size: 1rem;
+        }
+
+        /* Glass card */
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px var(--shadow);
+            animation: fadeInUp 0.8s ease;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .glass-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 40px var(--shadow);
+        }
+
+        h2 {
+            font-family: 'Montserrat', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--accent-blue);
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        h3 {
+            font-family: 'Montserrat', sans-serif;
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin: 20px 0 10px;
+        }
+
+        .icon {
+            font-size: 1.8rem;
+        }
+
+        p {
+            color: var(--text-secondary);
+            margin-bottom: 15px;
+        }
+
+        /* Navigation */
+        .nav-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .nav-button {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 15px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            color: var(--text-primary);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .nav-button:hover {
+            background: rgba(74, 158, 255, 0.2);
+            transform: translateY(-5px);
+            box-shadow: 0 8px 24px var(--shadow);
+        }
+
+        .nav-button .icon {
+            font-size: 2.5rem;
+        }
+
+        .nav-button span {
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        /* Platform badges */
+        .platforms {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin: 15px 0;
+        }
+
+        .platform-badge {
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-light));
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Feature list */
+        .feature-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .feature-list li {
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(74, 158, 255, 0.1);
+            color: var(--text-secondary);
+            display: flex;
+            align-items: start;
+            gap: 12px;
+        }
+
+        .feature-list li:last-child {
+            border-bottom: none;
+        }
+
+        .feature-list li::before {
+            content: '✓';
+            color: var(--accent-blue);
+            font-weight: bold;
+            font-size: 1.2rem;
+            flex-shrink: 0;
+        }
+
+        /* Command block */
+        .command {
+            background: rgba(15, 23, 41, 0.8);
+            border: 1px solid var(--accent-blue);
+            border-radius: 10px;
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            color: var(--accent-light);
+            margin: 15px 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .command:hover {
+            background: rgba(74, 158, 255, 0.1);
+            border-color: var(--accent-light);
+        }
+
+        .command code {
+            font-size: 1rem;
+        }
+
+        .copy-btn {
+            background: var(--accent-blue);
+            border: none;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.3s ease;
+        }
+
+        .copy-btn:hover {
+            background: var(--accent-light);
+            transform: scale(1.05);
+        }
+
+        /* FAQ */
+        .faq-item {
+            margin-bottom: 20px;
+        }
+
+        .faq-question {
+            background: rgba(15, 23, 41, 0.6);
+            padding: 15px;
+            border-radius: 10px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+
+        .faq-question:hover {
+            background: rgba(74, 158, 255, 0.2);
+        }
+
+        .faq-answer {
+            padding: 15px;
+            color: var(--text-secondary);
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .faq-item.active .faq-answer {
+            display: block;
+        }
+
+        .faq-toggle {
+            transition: transform 0.3s ease;
+        }
+
+        .faq-item.active .faq-toggle {
+            transform: rotate(180deg);
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 30px 0;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .bot-link {
+            color: var(--accent-blue);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s ease;
+        }
+
+        .bot-link:hover {
+            color: var(--accent-light);
+        }
+
+        /* Animations */
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container {
+                padding: 15px;
+            }
+
+            header {
+                padding: 30px 0 20px;
+            }
+
+            .logo {
+                font-size: 1.5rem;
+            }
+
+            .glass-card {
+                padding: 20px;
+            }
+
+            h2 {
+                font-size: 1.3rem;
+            }
+
+            .nav-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
+            }
+
+            .nav-button {
+                padding: 15px;
+            }
+
+            .nav-button .icon {
+                font-size: 2rem;
+            }
+        }
+
+        /* Smooth scroll */
+        html {
+            scroll-behavior: smooth;
+        }
+
+        /* Selection */
+        ::selection {
+            background: var(--accent-blue);
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">📥 UspSocDownloader</div>
+            <div class="subtitle">Скачивай контент из соцсетей легко</div>
+        </header>
+
+        <!-- Quick Navigation -->
+        <div class="nav-grid">
+            <a href="#start" class="nav-button">
+                <div class="icon">🚀</div>
+                <span>Начало работы</span>
+            </a>
+            <a href="#platforms" class="nav-button">
+                <div class="icon">📱</div>
+                <span>Платформы</span>
+            </a>
+            <a href="#features" class="nav-button">
+                <div class="icon">✨</div>
+                <span>Возможности</span>
+            </a>
+            <a href="#commands" class="nav-button">
+                <div class="icon">⚡</div>
+                <span>Команды</span>
+            </a>
+            <a href="#ai" class="nav-button">
+                <div class="icon">🤖</div>
+                <span>AI-функции</span>
+            </a>
+            <a href="#faq" class="nav-button">
+                <div class="icon">❓</div>
+                <span>FAQ</span>
+            </a>
+        </div>
+
+        <!-- Start -->
+        <div id="start" class="glass-card">
+            <h2><span class="icon">🚀</span> Начало работы</h2>
+            <p>UspSocDownloader - это Telegram-бот для скачивания контента из популярных социальных сетей. Просто отправьте ссылку боту, и он сделает всё остальное!</p>
+
+            <h3>Как начать?</h3>
+            <ol class="feature-list">
+                <li>Откройте бота в Telegram: <a href="https://t.me/UspSocDownloader_bot" class="bot-link">@UspSocDownloader_bot</a></li>
+                <li>Нажмите кнопку "Запустить" или отправьте команду /start</li>
+                <li>Скопируйте ссылку из Instagram, YouTube, TikTok или другой платформы</li>
+                <li>Отправьте ссылку боту и дождитесь загрузки</li>
+                <li>Готово! Бот отправит вам файл</li>
+            </ol>
+        </div>
+
+        <!-- Platforms -->
+        <div id="platforms" class="glass-card">
+            <h2><span class="icon">📱</span> Поддерживаемые платформы</h2>
+            <p>Бот работает с самыми популярными социальными сетями:</p>
+
+            <div class="platforms">
+                <div class="platform-badge">📸 Instagram</div>
+                <div class="platform-badge">📺 YouTube</div>
+                <div class="platform-badge">🎵 TikTok</div>
+                <div class="platform-badge">🐦 Twitter/X</div>
+                <div class="platform-badge">🎬 VK</div>
+            </div>
+
+            <h3>Что можно скачать?</h3>
+            <ul class="feature-list">
+                <li><strong>Instagram:</strong> видео, фото, карусели, Reels</li>
+                <li><strong>YouTube:</strong> видео, Shorts, аудио (MP3)</li>
+                <li><strong>TikTok:</strong> видео без водяного знака</li>
+                <li><strong>Twitter/X:</strong> видео, фото, несколько видео в одном твите</li>
+                <li><strong>VK:</strong> видео, клипы</li>
+            </ul>
+        </div>
+
+        <!-- Features -->
+        <div id="features" class="glass-card">
+            <h2><span class="icon">✨</span> Основные возможности</h2>
+
+            <h3>📥 Скачивание</h3>
+            <ul class="feature-list">
+                <li>Видео до 1080p качества</li>
+                <li>Фото в оригинальном качестве</li>
+                <li>Поддержка каруселей (до 10 медиа)</li>
+                <li>Выбор качества для YouTube (360p - 1080p)</li>
+                <li>Скачивание только аудио из YouTube (MP3)</li>
+            </ul>
+
+            <h3>📂 Организация</h3>
+            <ul class="feature-list">
+                <li>История всех загрузок</li>
+                <li>Избранное для важных файлов</li>
+                <li>Коллекции для группировки контента</li>
+                <li>Поиск по истории загрузок</li>
+                <li>Экспорт истории в CSV/JSON</li>
+            </ul>
+
+            <h3>⚙️ Настройки</h3>
+            <ul class="feature-list">
+                <li>Качество по умолчанию</li>
+                <li>Формат файлов</li>
+                <li>Автоматическое удаление старых файлов</li>
+                <li>Персональная статистика</li>
+            </ul>
+        </div>
+
+        <!-- Commands -->
+        <div id="commands" class="glass-card">
+            <h2><span class="icon">⚡</span> Основные команды</h2>
+            <p>Просто отправьте команду боту:</p>
+
+            <div class="command" onclick="copyCommand('/start')">
+                <code>/start</code>
+                <button class="copy-btn">Копировать</button>
+            </div>
+            <p style="margin-top: -10px; font-size: 0.9rem;">Запустить бота и показать главное меню</p>
+
+            <div class="command" onclick="copyCommand('/help')">
+                <code>/help</code>
+                <button class="copy-btn">Копировать</button>
+            </div>
+            <p style="margin-top: -10px; font-size: 0.9rem;">Показать справку и список команд</p>
+
+            <div class="command" onclick="copyCommand('/history')">
+                <code>/history</code>
+                <button class="copy-btn">Копировать</button>
+            </div>
+            <p style="margin-top: -10px; font-size: 0.9rem;">Посмотреть историю загрузок</p>
+
+            <div class="command" onclick="copyCommand('/search')">
+                <code>/search</code>
+                <button class="copy-btn">Копировать</button>
+            </div>
+            <p style="margin-top: -10px; font-size: 0.9rem;">Поиск по истории</p>
+
+            <div class="command" onclick="copyCommand('/favorites')">
+                <code>/favorites</code>
+                <button class="copy-btn">Копировать</button>
+            </div>
+            <p style="margin-top: -10px; font-size: 0.9rem;">Показать избранное</p>
+
+            <div class="command" onclick="copyCommand('/collections')">
+                <code>/collections</code>
+                <button class="copy-btn">Копировать</button>
+            </div>
+            <p style="margin-top: -10px; font-size: 0.9rem;">Управление коллекциями</p>
+
+            <div class="command" onclick="copyCommand('/settings')">
+                <code>/settings</code>
+                <button class="copy-btn">Копировать</button>
+            </div>
+            <p style="margin-top: -10px; font-size: 0.9rem;">Настройки бота</p>
+
+            <div class="command" onclick="copyCommand('/mystats')">
+                <code>/mystats</code>
+                <button class="copy-btn">Копировать</button>
+            </div>
+            <p style="margin-top: -10px; font-size: 0.9rem;">Ваша статистика использования</p>
+
+            <div class="command" onclick="copyCommand('/export')">
+                <code>/export</code>
+                <button class="copy-btn">Копировать</button>
+            </div>
+            <p style="margin-top: -10px; font-size: 0.9rem;">Экспорт истории в CSV/JSON</p>
+        </div>
+
+        <!-- AI Features -->
+        <div id="ai" class="glass-card">
+            <h2><span class="icon">🤖</span> AI-функции (GPT-4)</h2>
+            <p>Бот использует искусственный интеллект для работы с текстом:</p>
+
+            <h3>🌍 Перевод на русский</h3>
+            <p>Автоматический перевод любого текста с постов на русский язык. Идеально для иностранного контента.</p>
+
+            <h3>✍️ Рерайт текста</h3>
+            <p>Переписывание текста в разных стилях:</p>
+            <ul class="feature-list">
+                <li><strong>Экспертный стиль</strong> - серьёзный, профессиональный тон</li>
+                <li><strong>Юмористический</strong> - добавляет шутки и лёгкость</li>
+                <li><strong>Дружелюбный</strong> - более личный, тёплый стиль</li>
+            </ul>
+
+            <h3>📝 OCR (извлечение текста)</h3>
+            <p>Извлекает текст с изображений, скриншотов и инфографики. Особенно полезно для каруселей с текстовым контентом.</p>
+
+            <p style="margin-top: 20px; padding: 15px; background: rgba(74, 158, 255, 0.1); border-radius: 10px;">
+                💡 <strong>Совет:</strong> AI-кнопки появляются автоматически после скачивания контента с текстом!
+            </p>
+        </div>
+
+        <!-- FAQ -->
+        <div id="faq" class="glass-card">
+            <h2><span class="icon">❓</span> Часто задаваемые вопросы</h2>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="toggleFaq(this)">
+                    <span>📱 Можно ли скачать приватные посты Instagram?</span>
+                    <span class="faq-toggle">▼</span>
+                </div>
+                <div class="faq-answer">
+                    К сожалению, нет. Бот может скачивать только публичный контент. Для приватных постов требуется авторизация, что нарушает правила Instagram.
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="toggleFaq(this)">
+                    <span>⚡ Как быстро скачиваются файлы?</span>
+                    <span class="faq-toggle">▼</span>
+                </div>
+                <div class="faq-answer">
+                    Обычно 5-30 секунд в зависимости от размера файла и качества. Большие видео в 1080p могут занять до минуты.
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="toggleFaq(this)">
+                    <span>💎 Бот платный?</span>
+                    <span class="faq-toggle">▼</span>
+                </div>
+                <div class="faq-answer">
+                    Нет! Бот абсолютно бесплатный для всех пользователей. AI-функции также бесплатны.
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="toggleFaq(this)">
+                    <span>📏 Есть ли лимит на размер файла?</span>
+                    <span class="faq-toggle">▼</span>
+                </div>
+                <div class="faq-answer">
+                    Да, лимит Telegram - 50 МБ для обычных пользователей и 300 МБ для Premium. Если файл больше, бот предложит выбрать меньшее качество.
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="toggleFaq(this)">
+                    <span>🗑️ Как долго хранятся файлы?</span>
+                    <span class="faq-toggle">▼</span>
+                </div>
+                <div class="faq-answer">
+                    По умолчанию 7 дней. Вы можете изменить это в настройках (/settings) или добавить файлы в избранное для постоянного хранения.
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="toggleFaq(this)">
+                    <span>🔍 Можно ли искать по истории?</span>
+                    <span class="faq-toggle">▼</span>
+                </div>
+                <div class="faq-answer">
+                    Да! Используйте команду /search. Можно искать по названию, автору, платформе и дате.
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="toggleFaq(this)">
+                    <span>📁 Для чего нужны коллекции?</span>
+                    <span class="faq-toggle">▼</span>
+                </div>
+                <div class="faq-answer">
+                    Коллекции помогают организовать загрузки по темам. Например, "Рецепты", "Тренировки", "Мотивация" и т.д. Создавайте неограниченное количество коллекций!
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="toggleFaq(this)">
+                    <span>🛡️ Безопасно ли использовать бота?</span>
+                    <span class="faq-toggle">▼</span>
+                </div>
+                <div class="faq-answer">
+                    Да, абсолютно безопасно. Бот не хранит ваши личные данные и не требует авторизации в социальных сетях. Все файлы автоматически удаляются после установленного срока.
+                </div>
+            </div>
+        </div>
+
+        <!-- Tips -->
+        <div class="glass-card">
+            <h2><span class="icon">💡</span> Советы и трюки</h2>
+            <ul class="feature-list">
+                <li><strong>Используйте коллекции</strong> для организации контента по темам</li>
+                <li><strong>Добавляйте в избранное</strong> важные файлы, чтобы они не удалились автоматически</li>
+                <li><strong>Настройте качество по умолчанию</strong> в /settings, чтобы не выбирать каждый раз</li>
+                <li><strong>Экспортируйте историю</strong> в CSV для анализа в Excel/Google Sheets</li>
+                <li><strong>Используйте AI-рерайт</strong> для адаптации контента под вашу аудиторию</li>
+                <li><strong>OCR пригодится</strong> для извлечения рецептов, списков покупок, расписаний</li>
+            </ul>
+        </div>
+
+        <!-- Support -->
+        <div class="glass-card">
+            <h2><span class="icon">🆘</span> Поддержка</h2>
+            <p>Нужна помощь или нашли баг?</p>
+            <ul class="feature-list">
+                <li>Напишите в поддержку: <a href="https://t.me/smit_support" class="bot-link">@smit_support</a></li>
+                <li>Репорт бага на GitHub: <a href="https://github.com/ircitdev/UspSocDownloader/issues" class="bot-link" target="_blank">Issues</a></li>
+                <li>Документация: <a href="https://github.com/ircitdev/UspSocDownloader" class="bot-link" target="_blank">GitHub</a></li>
+            </ul>
+        </div>
+
+        <footer>
+            <p>Сделано с ❤️ для пользователей Telegram</p>
+            <p>
+                <a href="https://t.me/UspSocDownloader_bot" class="bot-link">@UspSocDownloader_bot</a> •
+                <a href="https://github.com/ircitdev/UspSocDownloader" class="bot-link" target="_blank">GitHub</a>
+            </p>
+            <p style="margin-top: 10px; font-size: 0.85rem;">Powered by Claude Code</p>
+        </footer>
+    </div>
+
+    <script>
+        // Initialize Telegram Web App
+        let tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.ready();
+
+        // Set theme colors
+        if (tg.themeParams) {
+            document.body.style.background = tg.themeParams.bg_color || 'linear-gradient(135deg, #0f1729 0%, #1a2642 100%)';
+        }
+
+        // FAQ toggle
+        function toggleFaq(element) {
+            const item = element.parentElement;
+            const isActive = item.classList.contains('active');
+
+            // Close all FAQ items
+            document.querySelectorAll('.faq-item').forEach(faq => {
+                faq.classList.remove('active');
+            });
+
+            // Open clicked item if it wasn't active
+            if (!isActive) {
+                item.classList.add('active');
+            }
+        }
+
+        // Copy command
+        function copyCommand(command) {
+            // Try to copy to clipboard
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(command).then(() => {
+                    showNotification('Команда скопирована!');
+                });
+            } else {
+                // Fallback for older browsers
+                const textarea = document.createElement('textarea');
+                textarea.value = command;
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                showNotification('Команда скопирована!');
+            }
+
+            // Vibrate on mobile
+            if (tg.HapticFeedback) {
+                tg.HapticFeedback.impactOccurred('light');
+            }
+        }
+
+        // Show notification
+        function showNotification(text) {
+            if (tg.showPopup) {
+                tg.showPopup({
+                    title: 'Успешно!',
+                    message: text,
+                    buttons: [{type: 'ok'}]
+                });
+            } else {
+                alert(text);
+            }
+        }
+
+        // Smooth scroll with offset
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    const offset = 20;
+                    const targetPosition = target.getBoundingClientRect().top + window.pageYOffset - offset;
+                    window.scrollTo({
+                        top: targetPosition,
+                        behavior: 'smooth'
+                    });
+
+                    // Haptic feedback
+                    if (tg.HapticFeedback) {
+                        tg.HapticFeedback.impactOccurred('light');
+                    }
+                }
+            });
+        });
+
+        // Add scroll animation
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = '1';
+                    entry.target.style.transform = 'translateY(0)';
+                }
+            });
+        }, { threshold: 0.1 });
+
+        document.querySelectorAll('.glass-card').forEach(card => {
+            card.style.opacity = '0';
+            card.style.transform = 'translateY(30px)';
+            card.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+            observer.observe(card);
+        });
+    </script>
+</body>
+</html>
