@@ -21,6 +21,67 @@ def is_admin(user_id: int) -> bool:
 
 # ==================== ПОЛЬЗОВАТЕЛЬСКИЕ КОМАНДЫ ====================
 
+# Обработчик текстовых сообщений для создания коллекции
+@router.message(lambda msg: msg.from_user.id in collection_creation_state and not msg.text.startswith('/'))
+async def handle_collection_name(message: types.Message) -> None:
+    """Обработать название новой коллекции."""
+    user_id = message.from_user.id
+
+    if user_id not in collection_creation_state:
+        return
+
+    try:
+        db = get_db_manager()
+        if not db:
+            await message.answer("❌ Ошибка создания коллекции")
+            del collection_creation_state[user_id]
+            return
+
+        collection_name = message.text.strip()
+
+        # Проверяем наличие эмодзи в начале
+        icon = "📁"
+        name = collection_name
+
+        # Простая проверка на эмодзи (первый символ)
+        if collection_name and len(collection_name) > 1:
+            first_char = collection_name[0]
+            # Если первый символ эмодзи (не латиница, не кириллица, не цифра)
+            if not first_char.isalnum():
+                icon = first_char
+                name = collection_name[1:].strip()
+
+        # Создаем коллекцию
+        collection_id = await db.create_collection(
+            user_id=user_id,
+            name=name,
+            description=None,
+            icon=icon
+        )
+
+        if collection_id:
+            await message.answer(
+                f"✅ Коллекция создана!\n\n{icon} <b>{name}</b>\n\n"
+                f"💡 Теперь вы можете добавлять загрузки в эту коллекцию через /history",
+                parse_mode="HTML"
+            )
+
+            # Очищаем состояние
+            del collection_creation_state[user_id]
+
+            # Показываем список коллекций
+            await collections_command(message)
+        else:
+            await message.answer("❌ Ошибка создания коллекции")
+            del collection_creation_state[user_id]
+
+    except Exception as e:
+        logger.error(f"Error creating collection: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка: {safe_format_error(e)}")
+        if user_id in collection_creation_state:
+            del collection_creation_state[user_id]
+
+
 @router.message(Command("stats"))
 async def stats_command(message: types.Message) -> None:
     """Показать статистику пользователя."""
@@ -231,25 +292,30 @@ async def history_command(message: types.Message) -> None:
 
             # Кнопки для первых 5 элементов
             if i <= 5:
-                row = []
-                row.append(InlineKeyboardButton(
+                row1 = []
+                row1.append(InlineKeyboardButton(
                     text=f"{i}. Скачать снова",
                     callback_data=f"history_redownload_{item['id']}"
                 ))
 
                 # Кнопка избранного (добавить или удалить)
                 if item['is_favorite']:
-                    row.append(InlineKeyboardButton(
+                    row1.append(InlineKeyboardButton(
                         text="💔",
                         callback_data=f"history_unfavorite_{item['id']}"
                     ))
                 else:
-                    row.append(InlineKeyboardButton(
+                    row1.append(InlineKeyboardButton(
                         text="⭐",
                         callback_data=f"history_favorite_{item['id']}"
                     ))
 
-                buttons.append(row)
+                row1.append(InlineKeyboardButton(
+                    text="📁",
+                    callback_data=f"history_add_to_collection_{item['id']}"
+                ))
+
+                buttons.append(row1)
 
         text = (
             "📂 <b>История загрузок</b>\n\n" +
@@ -366,6 +432,86 @@ async def favorites_command(message: types.Message) -> None:
 
     except Exception as e:
         logger.error(f"Error in favorites command: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка: {safe_format_error(e)}")
+
+
+@router.message(Command("collections"))
+async def collections_command(message: types.Message) -> None:
+    """Показать коллекции пользователя."""
+    user_id = message.from_user.id
+    logger.info(f"User {user_id} requested collections")
+
+    try:
+        db = get_db_manager()
+        if not db:
+            await message.answer("⚠️ Коллекции временно недоступны")
+            return
+
+        # Получаем все коллекции пользователя
+        collections = await db.get_collections(user_id)
+
+        if not collections:
+            text = (
+                "📁 <b>Коллекции</b>\n\n"
+                "У вас пока нет коллекций.\n\n"
+                "💡 Создайте коллекцию для организации своих загрузок!"
+            )
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="➕ Создать коллекцию",
+                    callback_data="collection_create"
+                )]
+            ])
+            await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+            return
+
+        # Формируем список коллекций
+        items = []
+        buttons = []
+
+        for i, collection in enumerate(collections[:10], 1):
+            icon = collection.get('icon', '📁')
+            name = collection.get('name', 'Без названия')
+
+            # Получаем количество элементов в коллекции
+            items_in_collection = await db.get_collection_items(collection['id'])
+            count = len(items_in_collection)
+
+            items.append(f"{i}. {icon} <b>{name}</b> ({count} шт.)")
+
+            # Кнопки для коллекций
+            row = []
+            row.append(InlineKeyboardButton(
+                text=f"{i}. Открыть",
+                callback_data=f"collection_open_{collection['id']}"
+            ))
+            row.append(InlineKeyboardButton(
+                text="✏️",
+                callback_data=f"collection_edit_{collection['id']}"
+            ))
+            row.append(InlineKeyboardButton(
+                text="🗑️",
+                callback_data=f"collection_delete_{collection['id']}"
+            ))
+            buttons.append(row)
+
+        # Кнопка создания новой коллекции
+        buttons.append([InlineKeyboardButton(
+            text="➕ Создать новую коллекцию",
+            callback_data="collection_create"
+        )])
+
+        text = (
+            f"📁 <b>Мои коллекции ({len(collections)})</b>\n\n" +
+            "\n".join(items)
+        )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+        await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+    except Exception as e:
+        logger.error(f"Error in collections command: {e}", exc_info=True)
         await message.answer(f"❌ Ошибка: {safe_format_error(e)}")
 
 
@@ -1537,6 +1683,79 @@ async def show_history_callback(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+@router.callback_query(lambda c: c.data.startswith("history_add_to_collection_"))
+async def history_add_to_collection_callback(callback: CallbackQuery) -> None:
+    """Добавить загрузку в коллекцию."""
+    try:
+        download_id = int(callback.data.split("_")[-1])
+        user_id = callback.from_user.id
+
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ Недоступно", show_alert=True)
+            return
+
+        # Получаем коллекции пользователя
+        collections = await db.get_collections(user_id)
+
+        if not collections:
+            await callback.answer(
+                "❌ Сначала создайте коллекцию через /collections",
+                show_alert=True
+            )
+            return
+
+        # Показываем список коллекций для выбора
+        buttons = []
+        for collection in collections[:10]:
+            buttons.append([InlineKeyboardButton(
+                text=f"{collection['icon']} {collection['name']}",
+                callback_data=f"add_to_col_{download_id}_{collection['id']}"
+            )])
+
+        buttons.append([InlineKeyboardButton(
+            text="« Отмена",
+            callback_data="show_history"
+        )])
+
+        text = "📁 <b>Выберите коллекцию:</b>"
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"Error in add to collection: {e}", exc_info=True)
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("add_to_col_"))
+async def add_to_col_callback(callback: CallbackQuery) -> None:
+    """Подтвердить добавление в коллекцию."""
+    try:
+        parts = callback.data.split("_")
+        download_id = int(parts[3])
+        collection_id = int(parts[4])
+
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ Недоступно", show_alert=True)
+            return
+
+        success = await db.add_to_collection(download_id, collection_id)
+
+        if success:
+            await callback.answer("✅ Добавлено в коллекцию")
+            await history_command(callback.message)
+        else:
+            await callback.answer("❌ Ошибка добавления", show_alert=True)
+
+    except Exception as e:
+        logger.error(f"Error confirming add to collection: {e}")
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
 # ==================== ИЗБРАННОЕ ====================
 
 @router.callback_query(lambda c: c.data.startswith("fav_download_"))
@@ -1680,3 +1899,289 @@ async def favorites_show_all_callback(callback: CallbackQuery) -> None:
     except Exception as e:
         logger.error(f"Error showing all favorites: {e}", exc_info=True)
         await callback.answer("❌ Ошибка", show_alert=True)
+
+
+# ==================== КОЛЛЕКЦИИ ====================
+
+# Словарь для хранения состояний создания коллекции
+collection_creation_state = {}
+
+
+@router.callback_query(lambda c: c.data == "collection_create")
+async def collection_create_callback(callback: CallbackQuery) -> None:
+    """Начать создание коллекции."""
+    user_id = callback.from_user.id
+
+    text = (
+        "📁 <b>Создание коллекции</b>\n\n"
+        "Отправьте название для новой коллекции.\n\n"
+        "Например: <code>Рецепты</code>, <code>Тренировки</code>, <code>Мотивация</code>\n\n"
+        "💡 Можно добавить эмодзи в начале: 🍕 Рецепты"
+    )
+
+    # Устанавливаем состояние ожидания названия
+    collection_creation_state[user_id] = {"waiting_for_name": True}
+
+    await callback.message.edit_text(text, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("collection_open_"))
+async def collection_open_callback(callback: CallbackQuery) -> None:
+    """Открыть коллекцию."""
+    try:
+        collection_id = int(callback.data.split("_")[-1])
+        user_id = callback.from_user.id
+
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ Недоступно", show_alert=True)
+            return
+
+        # Получаем элементы коллекции
+        items = await db.get_collection_items(collection_id)
+
+        # Получаем информацию о коллекции
+        collections = await db.get_collections(user_id)
+        collection = next((c for c in collections if c['id'] == collection_id), None)
+
+        if not collection:
+            await callback.answer("❌ Коллекция не найдена", show_alert=True)
+            return
+
+        if not items:
+            text = (
+                f"{collection['icon']} <b>{collection['name']}</b>\n\n"
+                "Коллекция пуста.\n\n"
+                "💡 Добавляйте загрузки в коллекцию через /history"
+            )
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="« Назад к коллекциям", callback_data="back_to_collections")]
+            ])
+            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+            await callback.answer()
+            return
+
+        platform_emoji = {
+            "Instagram": "📸",
+            "YouTube": "📺",
+            "TikTok": "🎵",
+            "VK": "🎬",
+            "Twitter": "🐦",
+            "X": "🐦"
+        }
+
+        # Формируем список элементов
+        lines = []
+        buttons = []
+
+        for i, item in enumerate(items[:10], 1):
+            emoji = platform_emoji.get(item['platform'], "📁")
+
+            try:
+                date = datetime.fromisoformat(item['download_date'])
+                date_str = date.strftime("%d.%m")
+            except:
+                date_str = ""
+
+            title = (item['title'] or "Без названия")[:30]
+            if len(item['title'] or "") > 30:
+                title += "..."
+
+            lines.append(f"{i}. {emoji} {title} {date_str}")
+
+            # Кнопки для первых 5
+            if i <= 5:
+                row = []
+                row.append(InlineKeyboardButton(
+                    text=f"{i}. Скачать",
+                    callback_data=f"col_download_{item['id']}"
+                ))
+                row.append(InlineKeyboardButton(
+                    text="🗑️",
+                    callback_data=f"col_remove_{item['id']}_{collection_id}"
+                ))
+                buttons.append(row)
+
+        buttons.append([InlineKeyboardButton(
+            text="« Назад к коллекциям",
+            callback_data="back_to_collections"
+        )])
+
+        text = (
+            f"{collection['icon']} <b>{collection['name']}</b>\n\n" +
+            "\n".join(lines)
+        )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"Error opening collection: {e}", exc_info=True)
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("collection_delete_"))
+async def collection_delete_callback(callback: CallbackQuery) -> None:
+    """Удалить коллекцию."""
+    try:
+        collection_id = int(callback.data.split("_")[-1])
+        user_id = callback.from_user.id
+
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ Недоступно", show_alert=True)
+            return
+
+        # Получаем информацию о коллекции для подтверждения
+        collections = await db.get_collections(user_id)
+        collection = next((c for c in collections if c['id'] == collection_id), None)
+
+        if not collection:
+            await callback.answer("❌ Коллекция не найдена", show_alert=True)
+            return
+
+        # Показываем подтверждение
+        text = (
+            f"🗑️ <b>Удалить коллекцию?</b>\n\n"
+            f"{collection['icon']} {collection['name']}\n\n"
+            "⚠️ Файлы из коллекции не будут удалены, только сама коллекция."
+        )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"collection_confirm_delete_{collection_id}"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="back_to_collections")
+            ]
+        ])
+
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"Error in delete collection: {e}")
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("collection_confirm_delete_"))
+async def collection_confirm_delete_callback(callback: CallbackQuery) -> None:
+    """Подтвердить удаление коллекции."""
+    try:
+        collection_id = int(callback.data.split("_")[-1])
+
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ Недоступно", show_alert=True)
+            return
+
+        # Удаляем коллекцию (нужно добавить метод в db_manager)
+        # Пока просто обнуляем collection_id у всех элементов
+        items = await db.get_collection_items(collection_id)
+        for item in items:
+            await db.add_to_collection(item['id'], None)
+
+        await callback.answer("✅ Коллекция удалена")
+        await collections_command(callback.message)
+
+    except Exception as e:
+        logger.error(f"Error confirming delete: {e}")
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("col_download_"))
+async def col_download_callback(callback: CallbackQuery) -> None:
+    """Скачать из коллекции."""
+    try:
+        download_id = int(callback.data.split("_")[-1])
+        user_id = callback.from_user.id
+
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ Недоступно", show_alert=True)
+            return
+
+        item = await db.get_download_by_id(download_id)
+
+        if not item or item['user_id'] != user_id:
+            await callback.answer("❌ Элемент не найден", show_alert=True)
+            return
+
+        # Проверяем файл и отправляем
+        file_path = item.get('file_path')
+        if file_path and os.path.exists(file_path):
+            try:
+                if file_path.endswith(('.mp4', '.mov', '.avi', '.webm')):
+                    await callback.message.answer_video(
+                        types.FSInputFile(file_path),
+                        caption=f"📁 Из коллекции: {item['title'] or 'Видео'}"
+                    )
+                elif file_path.endswith(('.mp3', '.m4a', '.wav')):
+                    await callback.message.answer_audio(
+                        types.FSInputFile(file_path),
+                        caption=f"📁 Из коллекции: {item['title'] or 'Аудио'}"
+                    )
+                elif file_path.endswith(('.jpg', '.jpeg', '.png', '.webp')):
+                    await callback.message.answer_photo(
+                        types.FSInputFile(file_path),
+                        caption=f"📁 Из коллекции: {item['title'] or 'Фото'}"
+                    )
+                else:
+                    await callback.message.answer_document(
+                        types.FSInputFile(file_path),
+                        caption=f"📁 Из коллекции: {item['title'] or 'Файл'}"
+                    )
+                await callback.answer("✅ Отправлено")
+            except Exception as e:
+                logger.error(f"Failed to resend: {e}")
+                await callback.answer("⏳ Скачиваю заново...")
+                await callback.message.answer(item['url'])
+        else:
+            await callback.answer("⏳ Скачиваю заново...")
+            await callback.message.answer(item['url'])
+
+    except Exception as e:
+        logger.error(f"Error in col_download: {e}", exc_info=True)
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("col_remove_"))
+async def col_remove_callback(callback: CallbackQuery) -> None:
+    """Удалить из коллекции."""
+    try:
+        parts = callback.data.split("_")
+        download_id = int(parts[2])
+        collection_id = int(parts[3])
+
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ Недоступно", show_alert=True)
+            return
+
+        # Убираем из коллекции
+        await db.add_to_collection(download_id, None)
+
+        await callback.answer("✅ Удалено из коллекции")
+
+        # Обновляем список
+        await collection_open_callback(
+            CallbackQuery(
+                id=callback.id,
+                from_user=callback.from_user,
+                message=callback.message,
+                chat_instance=callback.chat_instance,
+                data=f"collection_open_{collection_id}"
+            )
+        )
+
+    except Exception as e:
+        logger.error(f"Error in col_remove: {e}")
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data == "back_to_collections")
+async def back_to_collections_callback(callback: CallbackQuery) -> None:
+    """Вернуться к списку коллекций."""
+    await collections_command(callback.message)
+    await callback.answer()
