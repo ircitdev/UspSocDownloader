@@ -20,6 +20,11 @@ from src.localization.messages import (
 from src.utils.sheets import sheets_manager
 from src.config import config
 from src.database.db_manager import get_db_manager
+from src.utils.error_messages import (
+    get_error_type_from_exception,
+    get_user_friendly_error,
+    format_error_with_retry
+)
 
 # Лимит бесплатных скачиваний в сутки
 FREE_DAILY_LIMIT = 10
@@ -144,10 +149,13 @@ async def handle_url_message(message: types.Message):
             except Exception as e:
                 logger.error(f"Error in download process: {str(e)}")
 
+                # Определяем тип ошибки
+                error_type = get_error_type_from_exception(e)
+
                 # Логируем исключение
                 await sheets_manager.log_error(
                     user_id=user_id,
-                    error_type="download_exception",
+                    error_type=error_type,
                     error_message=str(e),
                     url=url,
                     platform=platform_name
@@ -157,9 +165,38 @@ async def handle_url_message(message: types.Message):
                     await status_msg.delete()
                 except:
                     pass
-                # Отправляем без parse_mode, чтобы избежать проблем с HTML entities
-                error_text = str(e)[:100]
-                await message.answer(f"❌ Ошибка загрузки: {error_text}")
+
+                # Получаем понятное сообщение об ошибке
+                error_message, keyboard_data = format_error_with_retry(error_type, url)
+
+                # Создаем клавиатуру если нужна кнопка повтора
+                keyboard = None
+                if keyboard_data and keyboard_data.get('show_retry'):
+                    buttons = [[
+                        InlineKeyboardButton(
+                            text="🔄 Попробовать снова",
+                            callback_data=f"retry_download"
+                        ),
+                        InlineKeyboardButton(
+                            text="❓ Помощь",
+                            callback_data="error_help"
+                        )
+                    ]]
+                    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+                    # Кэшируем URL для retry
+                    if not hasattr(handle_url_message, 'retry_cache'):
+                        handle_url_message.retry_cache = {}
+                    handle_url_message.retry_cache[user_id] = {
+                        "url": url,
+                        "timestamp": time.time()
+                    }
+
+                await message.answer(
+                    error_message,
+                    parse_mode="HTML",
+                    reply_markup=keyboard
+                )
 
     except Exception as e:
         logger.error(f"Error handling URL message from user {message.from_user.id}: {str(e)}")
@@ -1401,3 +1438,72 @@ async def handle_cancel_large_file_callback(callback: CallbackQuery):
 
     except Exception as e:
         logger.error(f"Error canceling large file: {e}")
+
+
+@router.callback_query(F.data == "retry_download")
+async def handle_retry_download_callback(callback: CallbackQuery) -> None:
+    """Повторить загрузку после ошибки."""
+    try:
+        user_id = callback.from_user.id
+
+        # Проверяем кэш retry
+        if not hasattr(handle_url_message, 'retry_cache'):
+            await callback.answer("❌ Ссылка не найдена", show_alert=True)
+            return
+
+        retry_data = handle_url_message.retry_cache.get(user_id)
+
+        if not retry_data:
+            await callback.answer("❌ Ссылка не найдена", show_alert=True)
+            return
+
+        # Проверяем время (не более 5 минут)
+        if time.time() - retry_data['timestamp'] > 300:
+            await callback.answer("❌ Ссылка устарела, отправьте заново", show_alert=True)
+            return
+
+        url = retry_data['url']
+
+        await callback.answer("🔄 Повторяю загрузку...")
+
+        # Удаляем сообщение с ошибкой
+        try:
+            await callback.message.delete()
+        except:
+            pass
+
+        # Повторяем загрузку - отправляем URL как новое сообщение
+        await callback.message.answer(url)
+
+    except Exception as e:
+        logger.error(f"Error in retry download: {e}")
+        await callback.answer("❌ Ошибка повтора", show_alert=True)
+
+
+@router.callback_query(F.data == "error_help")
+async def handle_error_help_callback(callback: CallbackQuery) -> None:
+    """Показать помощь по ошибкам."""
+    help_text = (
+        "❓ <b>Помощь по ошибкам</b>\n\n"
+
+        "<b>⏳ Instagram ограничил доступ</b>\n"
+        "Подождите 5-10 минут перед следующей попыткой\n\n"
+
+        "<b>🔒 Пост недоступен</b>\n"
+        "• Проверьте что профиль публичный\n"
+        "• Убедитесь что ссылка правильная\n"
+        "• Пост мог быть удален\n\n"
+
+        "<b>📦 Файл слишком большой</b>\n"
+        "• Измените качество в /settings\n"
+        "• Telegram ограничивает файлы до 50 MB\n\n"
+
+        "<b>⌛ Превышено время</b>\n"
+        "• Попробуйте позже\n"
+        "• Выберите меньшее качество\n\n"
+
+        "💡 Если проблема повторяется, напишите в поддержку @smit_support"
+    )
+
+    await callback.message.answer(help_text, parse_mode="HTML")
+    await callback.answer()
