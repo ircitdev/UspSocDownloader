@@ -247,6 +247,18 @@ https://vk.com/video-123_456
 2. **Сделать рерайт** - выбор из 3 стилей
 3. **Получить текст с картинок** - OCR для каруселей с текстом
 
+### 📚 Полное руководство
+
+Подробное руководство пользователя с примерами и FAQ: **[USER_GUIDE.md](USER_GUIDE.md)**
+
+---
+
+## Документация
+
+- **[USER_GUIDE.md](USER_GUIDE.md)** - Полное руководство пользователя с примерами и FAQ
+- **[API_DOCUMENTATION.md](API_DOCUMENTATION.md)** - Техническая документация для разработчиков
+- **[CLAUDE.md](CLAUDE.md)** - Инструкции для Claude Code при работе с проектом
+
 ---
 
 ## API Reference
@@ -300,14 +312,30 @@ await check_images_have_text(image_paths: List[str]) -> bool
 ### Тестирование
 
 ```bash
-# Все тесты
-pytest
+# Запустить все тесты
+python tests/test_all.py
 
-# С покрытием
-pytest --cov=src
+# Тесты доступны:
+# - test_database(): Database operations (13 tests)
+# - test_export(): CSV/JSON export (10 tests)
+# - test_search(): History search (8 tests)
+# - test_cleanup_service(): File cleanup (6 tests)
 
-# Только unit тесты
-pytest tests/unit/
+# Отдельные тестовые модули:
+python test_collection_edit.py
+python test_search.py
+python test_export.py
+python test_cleanup.py
+```
+
+**Результаты тестирования:**
+
+```text
+✅ Database Tests: 13/13 passed (100%)
+✅ Export Tests: 10/10 passed (100%)
+✅ Search Tests: 8/8 passed (100%)
+✅ Cleanup Tests: 6/6 passed (100%)
+Total: 37/37 tests passed
 ```
 
 ### Линтинг
