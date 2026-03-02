@@ -77,10 +77,11 @@ async def start_command(message: types.Message) -> None:
                 ],
                 [
                     InlineKeyboardButton(text="📂 История", callback_data="show_history"),
-                    InlineKeyboardButton(text="⚙️ Настройки", callback_data="show_settings")
+                    InlineKeyboardButton(text="⭐ Избранное", callback_data="show_favorites")
                 ],
                 [
-                    InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin_panel")
+                    InlineKeyboardButton(text="⚙️ Настройки", callback_data="show_settings"),
+                    InlineKeyboardButton(text="👑 Админ", callback_data="admin_panel")
                 ],
                 [
                     InlineKeyboardButton(text="📤 Поделиться ботом", switch_inline_query="Качай видео с Instagram, TikTok, YouTube!")
@@ -94,6 +95,9 @@ async def start_command(message: types.Message) -> None:
                 ],
                 [
                     InlineKeyboardButton(text="📂 История", callback_data="show_history"),
+                    InlineKeyboardButton(text="⭐ Избранное", callback_data="show_favorites")
+                ],
+                [
                     InlineKeyboardButton(text="⚙️ Настройки", callback_data="show_settings")
                 ],
                 [
@@ -119,4 +123,12 @@ async def show_settings_callback(callback: CallbackQuery) -> None:
     """Показать настройки через callback."""
     from src.handlers.commands import settings_command
     await settings_command(callback.message)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "show_favorites")
+async def show_favorites_callback(callback: CallbackQuery) -> None:
+    """Показать избранное через callback."""
+    from src.handlers.commands import favorites_command
+    await favorites_command(callback.message)
     await callback.answer()

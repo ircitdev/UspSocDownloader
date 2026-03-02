@@ -273,6 +273,102 @@ async def history_command(message: types.Message) -> None:
         await message.answer(f"❌ Ошибка: {safe_format_error(e)}")
 
 
+@router.message(Command("favorites"))
+async def favorites_command(message: types.Message) -> None:
+    """Показать избранные загрузки."""
+    user_id = message.from_user.id
+    logger.info(f"User {user_id} requested favorites")
+
+    try:
+        db = get_db_manager()
+        if not db:
+            await message.answer("⚠️ Избранное временно недоступно")
+            return
+
+        # Получаем избранные загрузки
+        favorites = await db.get_download_history(user_id, limit=50, favorites_only=True)
+
+        if not favorites:
+            text = (
+                "⭐ <b>Избранное</b>\n\n"
+                "Избранное пусто.\n\n"
+                "💡 Добавляйте загрузки в избранное через /history или нажимая ⭐ при просмотре"
+            )
+            await message.answer(text, parse_mode="HTML")
+            return
+
+        # Эмодзи для платформ
+        platform_emoji = {
+            "Instagram": "📸",
+            "YouTube": "📺",
+            "TikTok": "🎵",
+            "VK": "🎬",
+            "Twitter": "🐦",
+            "X": "🐦"
+        }
+
+        # Формируем текст с избранным
+        items = []
+        buttons = []
+
+        for i, item in enumerate(favorites[:10], 1):
+            emoji = platform_emoji.get(item['platform'], "📁")
+
+            # Дата
+            try:
+                date = datetime.fromisoformat(item['download_date'])
+                date_str = date.strftime("%d.%m %H:%M")
+            except:
+                date_str = "недавно"
+
+            # Название
+            title = (item['title'] or "Без названия")[:35]
+            if len(item['title'] or "") > 35:
+                title += "..."
+
+            # Размер
+            file_size = item['file_size'] or 0
+            size_mb = file_size / 1024 / 1024 if file_size > 0 else 0
+
+            items.append(
+                f"{i}. {emoji} <b>{title}</b>\n"
+                f"   {date_str} • {size_mb:.1f} MB"
+            )
+
+            # Кнопки для первых 5 элементов
+            if i <= 5:
+                row = []
+                row.append(InlineKeyboardButton(
+                    text=f"{i}. Скачать",
+                    callback_data=f"fav_download_{item['id']}"
+                ))
+                row.append(InlineKeyboardButton(
+                    text="💔",
+                    callback_data=f"fav_remove_{item['id']}"
+                ))
+                buttons.append(row)
+
+        text = (
+            f"⭐ <b>Избранное ({len(favorites)})</b>\n\n" +
+            "\n\n".join(items)
+        )
+
+        # Кнопка показать больше
+        if len(favorites) > 10:
+            buttons.append([InlineKeyboardButton(
+                text="📊 Показать все",
+                callback_data="favorites_show_all"
+            )])
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+
+        await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+    except Exception as e:
+        logger.error(f"Error in favorites command: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка: {safe_format_error(e)}")
+
+
 @router.message(Command("settings"))
 async def settings_command(message: types.Message) -> None:
     """Показать настройки пользователя."""
@@ -1439,3 +1535,148 @@ async def show_history_callback(callback: CallbackQuery) -> None:
     """Показать историю (callback для главного меню)."""
     await history_command(callback.message)
     await callback.answer()
+
+
+# ==================== ИЗБРАННОЕ ====================
+
+@router.callback_query(lambda c: c.data.startswith("fav_download_"))
+async def fav_download_callback(callback: CallbackQuery) -> None:
+    """Скачать из избранного."""
+    try:
+        download_id = int(callback.data.split("_")[-1])
+        user_id = callback.from_user.id
+
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ Недоступно", show_alert=True)
+            return
+
+        # Получаем запись
+        item = await db.get_download_by_id(download_id)
+
+        if not item or item['user_id'] != user_id:
+            await callback.answer("❌ Элемент не найден", show_alert=True)
+            return
+
+        # Проверяем файл
+        file_path = item.get('file_path')
+        if file_path and os.path.exists(file_path):
+            try:
+                # Отправляем из кэша
+                if file_path.endswith(('.mp4', '.mov', '.avi', '.webm')):
+                    await callback.message.answer_video(
+                        types.FSInputFile(file_path),
+                        caption=f"⭐ Из избранного: {item['title'] or 'Видео'}"
+                    )
+                elif file_path.endswith(('.mp3', '.m4a', '.wav')):
+                    await callback.message.answer_audio(
+                        types.FSInputFile(file_path),
+                        caption=f"⭐ Из избранного: {item['title'] or 'Аудио'}"
+                    )
+                elif file_path.endswith(('.jpg', '.jpeg', '.png', '.webp')):
+                    await callback.message.answer_photo(
+                        types.FSInputFile(file_path),
+                        caption=f"⭐ Из избранного: {item['title'] or 'Фото'}"
+                    )
+                else:
+                    await callback.message.answer_document(
+                        types.FSInputFile(file_path),
+                        caption=f"⭐ Из избранного: {item['title'] or 'Файл'}"
+                    )
+
+                await callback.answer("✅ Отправлено из кэша")
+            except Exception as e:
+                logger.error(f"Failed to resend file: {e}")
+                await callback.answer("⏳ Скачиваю заново...")
+                await callback.message.answer(item['url'])
+        else:
+            # Скачиваем заново
+            await callback.answer("⏳ Скачиваю заново...")
+            await callback.message.answer(item['url'])
+
+    except Exception as e:
+        logger.error(f"Error in fav_download callback: {e}", exc_info=True)
+        await callback.answer(f"❌ Ошибка: {str(e)[:50]}", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("fav_remove_"))
+async def fav_remove_callback(callback: CallbackQuery) -> None:
+    """Удалить из избранного."""
+    try:
+        download_id = int(callback.data.split("_")[-1])
+
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ Недоступно", show_alert=True)
+            return
+
+        success = await db.remove_from_favorites(download_id)
+        if success:
+            await callback.answer("💔 Удалено из избранного")
+            # Обновляем список избранного
+            await favorites_command(callback.message)
+        else:
+            await callback.answer("❌ Ошибка", show_alert=True)
+
+    except Exception as e:
+        logger.error(f"Error removing from favorites: {e}")
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data == "favorites_show_all")
+async def favorites_show_all_callback(callback: CallbackQuery) -> None:
+    """Показать все избранные."""
+    try:
+        user_id = callback.from_user.id
+
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ Недоступно", show_alert=True)
+            return
+
+        # Получаем все избранные
+        favorites = await db.get_download_history(user_id, limit=100, favorites_only=True)
+
+        if not favorites:
+            await callback.answer("📭 Избранное пусто", show_alert=True)
+            return
+
+        platform_emoji = {
+            "Instagram": "📸",
+            "YouTube": "📺",
+            "TikTok": "🎵",
+            "VK": "🎬",
+            "Twitter": "🐦",
+            "X": "🐦"
+        }
+
+        items = []
+        for i, item in enumerate(favorites[:20], 1):
+            emoji = platform_emoji.get(item['platform'], "📁")
+
+            try:
+                date = datetime.fromisoformat(item['download_date'])
+                date_str = date.strftime("%d.%m")
+            except:
+                date_str = "недавно"
+
+            title = (item['title'] or "Без названия")[:30]
+            if len(item['title'] or "") > 30:
+                title += "..."
+
+            items.append(f"{i}. {emoji} {title} ({date_str})")
+
+        text = (
+            f"⭐ <b>Все избранное ({len(favorites)})</b>\n\n" +
+            "\n".join(items)
+        )
+
+        if len(favorites) > 20:
+            text += f"\n\n...и еще {len(favorites) - 20}"
+
+        await callback.message.edit_text(text, parse_mode="HTML")
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"Error showing all favorites: {e}", exc_info=True)
+        await callback.answer("❌ Ошибка", show_alert=True)
