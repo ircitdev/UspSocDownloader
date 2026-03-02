@@ -9,6 +9,7 @@ from src.utils.sheets import sheets_manager
 from src.utils.text_helpers import safe_format_error
 from src.config import config
 from src.database.db_manager import get_db_manager
+from src.utils.rate_limiter import rate_limiter
 
 logger = get_logger(__name__)
 router = Router()
@@ -865,6 +866,60 @@ async def cancel_command(message: types.Message) -> None:
         await message.answer("❌ Обновление cookies отменено.")
     else:
         await message.answer("Нечего отменять.")
+
+
+@router.message(Command("ratelimit"))
+async def ratelimit_command(message: types.Message) -> None:
+    """Показать статистику rate limiter (только админ)."""
+    user_id = message.from_user.id
+
+    if not is_admin(user_id):
+        await message.answer("❌ У вас нет доступа к этой команде.")
+        return
+
+    try:
+        stats = rate_limiter.get_stats()
+
+        lines = ["📊 <b>Статистика Rate Limiter</b>\n"]
+
+        for platform, data in stats.items():
+            if data['request_count'] == 0:
+                continue
+
+            icon_map = {
+                "instagram": "📸",
+                "youtube": "📺",
+                "tiktok": "🎵",
+                "vk": "🎬",
+                "twitter": "🐦",
+                "facebook": "📘"
+            }
+
+            icon = icon_map.get(platform, "📁")
+            avg_wait = data['avg_wait_per_request']
+
+            lines.append(
+                f"{icon} <b>{platform.title()}</b>\n"
+                f"   Запросов: {data['request_count']}\n"
+                f"   Интервал: {data['min_interval']}s\n"
+                f"   Всего ожидания: {data['total_wait_time']:.1f}s\n"
+                f"   Среднее ожидание: {avg_wait:.2f}s\n"
+            )
+
+        if len(lines) == 1:
+            lines.append("Нет данных. Загрузки еще не было.")
+
+        text = "\n".join(lines)
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Сбросить статистику", callback_data="ratelimit_reset")]
+        ])
+
+        await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+    except Exception as e:
+        logger.error(f"Error in ratelimit command: {e}")
+        await message.answer(f"❌ Ошибка: {safe_format_error(e)}")
 
 
 # ==================== CALLBACK HANDLERS FOR PREMIUM ====================
@@ -2185,3 +2240,15 @@ async def back_to_collections_callback(callback: CallbackQuery) -> None:
     """Вернуться к списку коллекций."""
     await collections_command(callback.message)
     await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "ratelimit_reset")
+async def ratelimit_reset_callback(callback: CallbackQuery) -> None:
+    """Сбросить статистику rate limiter."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    rate_limiter.reset_stats()
+    await callback.answer("✅ Статистика сброшена")
+    await callback.message.answer("✅ Статистика rate limiter сброшена")

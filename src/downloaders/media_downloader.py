@@ -11,6 +11,7 @@ from typing import Optional, Dict, List
 from dataclasses import dataclass
 from src.utils.logger import get_logger
 from src.config import config
+from src.utils.rate_limiter import rate_limiter
 
 logger = get_logger(__name__)
 
@@ -175,6 +176,9 @@ class MediaDownloader:
         import yt_dlp
 
         try:
+            # Rate limiting для YouTube
+            await rate_limiter.wait_if_needed("youtube")
+
             output_dir = self.DOWNLOAD_DIRS["video"]
             output_template = str(output_dir / f"%(id)s_{quality}p.%(ext)s")
 
@@ -240,6 +244,9 @@ class MediaDownloader:
         import yt_dlp
 
         try:
+            # Rate limiting для YouTube
+            await rate_limiter.wait_if_needed("youtube")
+
             output_dir = self.DOWNLOAD_DIRS["audio"]
             output_template = str(output_dir / "%(id)s.%(ext)s")
 
@@ -564,6 +571,9 @@ class MediaDownloader:
     async def download_twitter_photo(self, url: str, platform: str = "unknown") -> DownloadInfo:
         """Скачивает фото из Twitter/X твита используя gallery-dl"""
         try:
+            # Rate limiting для Twitter
+            await rate_limiter.wait_if_needed("twitter")
+
             logger.info(f"Starting Twitter photo download: {url}")
             import subprocess
             import aiohttp
@@ -785,6 +795,11 @@ class MediaDownloader:
     async def download_instagram_gallery(self, url: str, platform: str = "instagram") -> DownloadInfo:
         """Скачивает Instagram пост (фото/карусель) через gallery-dl с cookies"""
         try:
+            # Применяем rate limiting для Instagram
+            wait_time = await rate_limiter.wait_if_needed("instagram")
+            if wait_time > 0:
+                logger.info(f"Rate limited Instagram download by {wait_time:.1f}s")
+
             logger.info(f"Starting Instagram gallery download: {url}")
             import subprocess
             import aiohttp
