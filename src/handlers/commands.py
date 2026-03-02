@@ -19,6 +19,9 @@ router = Router()
 # State для поиска
 search_state = {}
 
+# State для редактирования коллекций
+collection_edit_state = {}
+
 
 def is_admin(user_id: int) -> bool:
     """Check if user is admin."""
@@ -2270,6 +2273,16 @@ async def collection_open_callback(callback: CallbackQuery) -> None:
                 "💡 Добавляйте загрузки в коллекцию через /history"
             )
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="✏️ Редактировать",
+                        callback_data=f"collection_edit_{collection_id}"
+                    ),
+                    InlineKeyboardButton(
+                        text="🗑️ Удалить",
+                        callback_data=f"collection_delete_{collection_id}"
+                    )
+                ],
                 [InlineKeyboardButton(text="« Назад к коллекциям", callback_data="back_to_collections")]
             ])
             await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
@@ -2317,6 +2330,17 @@ async def collection_open_callback(callback: CallbackQuery) -> None:
                 ))
                 buttons.append(row)
 
+        # Добавляем кнопки управления коллекцией
+        buttons.append([
+            InlineKeyboardButton(
+                text="✏️ Редактировать",
+                callback_data=f"collection_edit_{collection_id}"
+            ),
+            InlineKeyboardButton(
+                text="🗑️ Удалить",
+                callback_data=f"collection_delete_{collection_id}"
+            )
+        ])
         buttons.append([InlineKeyboardButton(
             text="« Назад к коллекциям",
             callback_data="back_to_collections"
@@ -3263,3 +3287,296 @@ async def open_search_callback(callback: CallbackQuery) -> None:
     """Открыть поиск из истории."""
     await search_command(callback.message)
     await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("collection_edit_"))
+async def collection_edit_callback(callback: CallbackQuery) -> None:
+    """Открыть меню редактирования коллекции."""
+    try:
+        collection_id = int(callback.data.split("_")[-1])
+        user_id = callback.from_user.id
+
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ Недоступно", show_alert=True)
+            return
+
+        # Получаем коллекцию
+        collection = await db.get_collection_by_id(collection_id)
+
+        if not collection or collection['user_id'] != user_id:
+            await callback.answer("❌ Коллекция не найдена", show_alert=True)
+            return
+
+        text = (
+            f"✏️ <b>Редактирование коллекции</b>\n\n"
+            f"Название: <b>{collection['name']}</b>\n"
+            f"Иконка: {collection['icon']}\n\n"
+            "Что хотите изменить?"
+        )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✏️ Изменить название",
+                    callback_data=f"collection_edit_name_{collection_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🎨 Изменить иконку",
+                    callback_data=f"collection_edit_icon_{collection_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="« Назад к коллекции",
+                    callback_data=f"collection_open_{collection_id}"
+                )
+            ]
+        ])
+
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"Error in collection_edit: {e}", exc_info=True)
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("collection_edit_name_"))
+async def collection_edit_name_callback(callback: CallbackQuery) -> None:
+    """Начать редактирование названия коллекции."""
+    try:
+        collection_id = int(callback.data.split("_")[-1])
+        user_id = callback.from_user.id
+
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ Недоступно", show_alert=True)
+            return
+
+        # Получаем коллекцию
+        collection = await db.get_collection_by_id(collection_id)
+
+        if not collection or collection['user_id'] != user_id:
+            await callback.answer("❌ Коллекция не найдена", show_alert=True)
+            return
+
+        # Активируем режим редактирования названия
+        collection_edit_state[user_id] = {
+            'mode': 'name',
+            'collection_id': collection_id,
+            'current_name': collection['name']
+        }
+
+        text = (
+            f"✏️ <b>Изменение названия коллекции</b>\n\n"
+            f"Текущее название: <b>{collection['name']}</b>\n\n"
+            "Отправьте новое название коллекции:"
+        )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="« Отмена",
+                    callback_data=f"collection_edit_cancel_{collection_id}"
+                )
+            ]
+        ])
+
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"Error in collection_edit_name: {e}", exc_info=True)
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("collection_edit_icon_"))
+async def collection_edit_icon_callback(callback: CallbackQuery) -> None:
+    """Начать редактирование иконки коллекции."""
+    try:
+        collection_id = int(callback.data.split("_")[-1])
+        user_id = callback.from_user.id
+
+        db = get_db_manager()
+        if not db:
+            await callback.answer("❌ Недоступно", show_alert=True)
+            return
+
+        # Получаем коллекцию
+        collection = await db.get_collection_by_id(collection_id)
+
+        if not collection or collection['user_id'] != user_id:
+            await callback.answer("❌ Коллекция не найдена", show_alert=True)
+            return
+
+        # Активируем режим редактирования иконки
+        collection_edit_state[user_id] = {
+            'mode': 'icon',
+            'collection_id': collection_id,
+            'current_icon': collection['icon']
+        }
+
+        text = (
+            f"🎨 <b>Изменение иконки коллекции</b>\n\n"
+            f"Текущая иконка: {collection['icon']}\n\n"
+            "Отправьте новый эмодзи для коллекции:"
+        )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="« Отмена",
+                    callback_data=f"collection_edit_cancel_{collection_id}"
+                )
+            ]
+        ])
+
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"Error in collection_edit_icon: {e}", exc_info=True)
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("collection_edit_cancel_"))
+async def collection_edit_cancel_callback(callback: CallbackQuery) -> None:
+    """Отменить редактирование коллекции."""
+    try:
+        collection_id = int(callback.data.split("_")[-1])
+        user_id = callback.from_user.id
+
+        # Деактивируем режим редактирования
+        if user_id in collection_edit_state:
+            del collection_edit_state[user_id]
+
+        # Возвращаемся к меню редактирования
+        await collection_edit_callback(
+            CallbackQuery(
+                id=callback.id,
+                from_user=callback.from_user,
+                message=callback.message,
+                chat_instance=callback.chat_instance,
+                data=f"collection_edit_{collection_id}"
+            )
+        )
+
+    except Exception as e:
+        logger.error(f"Error in collection_edit_cancel: {e}", exc_info=True)
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+# Обработчик текстовых сообщений для редактирования коллекции
+@router.message(lambda msg: msg.from_user.id in collection_edit_state and
+                not msg.text.startswith('/'))
+async def handle_collection_edit(message: types.Message) -> None:
+    """Обработать редактирование коллекции."""
+    user_id = message.from_user.id
+    state = collection_edit_state.get(user_id)
+
+    if not state:
+        return
+
+    try:
+        db = get_db_manager()
+        if not db:
+            await message.answer("❌ Недоступно")
+            return
+
+        collection_id = state['collection_id']
+        mode = state['mode']
+
+        if mode == 'name':
+            # Редактирование названия
+            new_name = message.text.strip()
+
+            if len(new_name) > 50:
+                await message.answer(
+                    "❌ Название слишком длинное (максимум 50 символов)\n"
+                    "Попробуйте короче:"
+                )
+                return
+
+            if len(new_name) < 1:
+                await message.answer(
+                    "❌ Название не может быть пустым\n"
+                    "Введите название:"
+                )
+                return
+
+            # Обновляем название
+            success = await db.update_collection(
+                collection_id=collection_id,
+                name=new_name
+            )
+
+            if success:
+                # Деактивируем режим редактирования
+                del collection_edit_state[user_id]
+
+                await message.answer(
+                    f"✅ Название коллекции изменено на:\n<b>{new_name}</b>",
+                    parse_mode="HTML"
+                )
+
+                # Открываем коллекцию
+                await collections_command(message)
+
+            else:
+                await message.answer("❌ Не удалось изменить название")
+
+        elif mode == 'icon':
+            # Редактирование иконки
+            new_icon = message.text.strip()
+
+            # Простая проверка на эмодзи (можно улучшить)
+            import re
+            emoji_pattern = re.compile(
+                "["
+                "\U0001F600-\U0001F64F"  # emoticons
+                "\U0001F300-\U0001F5FF"  # symbols & pictographs
+                "\U0001F680-\U0001F6FF"  # transport & map symbols
+                "\U0001F1E0-\U0001F1FF"  # flags
+                "\U00002702-\U000027B0"
+                "\U000024C2-\U0001F251"
+                "]+",
+                flags=re.UNICODE
+            )
+
+            if not emoji_pattern.match(new_icon):
+                await message.answer(
+                    "❌ Отправьте эмодзи для иконки\n"
+                    "Например: 📸 🎬 🎵 📚 🎮"
+                )
+                return
+
+            # Берем только первый эмодзи
+            icon = emoji_pattern.findall(new_icon)[0][0] if emoji_pattern.findall(new_icon) else new_icon[0]
+
+            # Обновляем иконку
+            success = await db.update_collection(
+                collection_id=collection_id,
+                icon=icon
+            )
+
+            if success:
+                # Деактивируем режим редактирования
+                del collection_edit_state[user_id]
+
+                await message.answer(
+                    f"✅ Иконка коллекции изменена на: {icon}",
+                    parse_mode="HTML"
+                )
+
+                # Открываем коллекцию
+                await collections_command(message)
+
+            else:
+                await message.answer("❌ Не удалось изменить иконку")
+
+    except Exception as e:
+        logger.error(f"Error handling collection edit: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка: {safe_format_error(e)}")

@@ -552,6 +552,128 @@ class DatabaseManager:
             logger.error(f"Failed to get collection items: {e}")
             return []
 
+    @async_db_operation
+    def update_collection(
+        self,
+        collection_id: int,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        icon: Optional[str] = None
+    ) -> bool:
+        """Update collection details.
+
+        Args:
+            collection_id: Collection ID
+            name: New name (optional)
+            description: New description (optional)
+            icon: New icon (optional)
+
+        Returns:
+            True if successful
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Build update query
+            updates = {}
+            if name is not None:
+                updates['name'] = name
+            if description is not None:
+                updates['description'] = description
+            if icon is not None:
+                updates['icon'] = icon
+
+            if not updates:
+                conn.close()
+                return False
+
+            set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
+            values = list(updates.values()) + [collection_id]
+
+            cursor.execute(
+                f"UPDATE collections SET {set_clause} WHERE id = ?",
+                values
+            )
+
+            success = cursor.rowcount > 0
+            conn.commit()
+            conn.close()
+
+            logger.info(f"Updated collection {collection_id}: {updates}")
+            return success
+
+        except Exception as e:
+            logger.error(f"Failed to update collection: {e}")
+            return False
+
+    @async_db_operation
+    def get_collection_by_id(self, collection_id: int) -> Optional[Dict[str, Any]]:
+        """Get collection by ID.
+
+        Args:
+            collection_id: Collection ID
+
+        Returns:
+            Collection dict or None
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            cursor.execute(
+                "SELECT * FROM collections WHERE id = ?",
+                (collection_id,)
+            )
+            row = cursor.fetchone()
+
+            result = dict(row) if row else None
+            conn.close()
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to get collection {collection_id}: {e}")
+            return None
+
+    @async_db_operation
+    def delete_collection(self, collection_id: int) -> bool:
+        """Delete collection and unlink all items.
+
+        Args:
+            collection_id: Collection ID
+
+        Returns:
+            True if successful
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Unlink all items from this collection
+            cursor.execute(
+                "UPDATE download_history SET collection_id = NULL WHERE collection_id = ?",
+                (collection_id,)
+            )
+
+            # Delete collection
+            cursor.execute(
+                "DELETE FROM collections WHERE id = ?",
+                (collection_id,)
+            )
+
+            success = cursor.rowcount > 0
+            conn.commit()
+            conn.close()
+
+            logger.info(f"Deleted collection {collection_id}")
+            return success
+
+        except Exception as e:
+            logger.error(f"Failed to delete collection: {e}")
+            return False
+
 
 # Global instance
 _db_manager: Optional[DatabaseManager] = None
