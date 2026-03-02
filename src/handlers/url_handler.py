@@ -1061,14 +1061,9 @@ async def handle_translate_callback(callback: CallbackQuery):
             await callback.answer("Текст не найден", show_alert=True)
             return
 
-        await callback.answer()
+        await callback.answer("⏳ Переводим...")
 
         is_html_content = "<pre>" in original_text or "<b>" in original_text
-
-        await callback.message.edit_text(
-            "⏳ Выполняется перевод...",
-            reply_markup=None
-        )
 
         translated_text = await translate_to_russian(original_text)
 
@@ -1079,13 +1074,15 @@ async def handle_translate_callback(callback: CallbackQuery):
             )]
         ])
 
-        await callback.message.edit_text(
-            translated_text,
+        # Отправляем НОВОЕ сообщение с переводом, не удаляя оригинал
+        new_msg = await callback.message.answer(
+            f"🇷🇺 <b>Перевод:</b>\n\n{translated_text}",
             reply_markup=keyboard,
-            parse_mode="HTML" if is_html_content else None
+            parse_mode="HTML"
         )
 
-        original_texts_cache[message_id] = translated_text
+        # Кэшируем перевод для нового сообщения
+        original_texts_cache[new_msg.message_id] = translated_text
 
         logger.info(f"Translated message {message_id} for user {callback.from_user.id}")
 
