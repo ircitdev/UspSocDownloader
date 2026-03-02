@@ -83,6 +83,148 @@ async def handle_collection_name(message: types.Message) -> None:
             del collection_creation_state[user_id]
 
 
+@router.message(Command("mystats"))
+async def mystats_command(message: types.Message) -> None:
+    """Показать расширенную статистику пользователя из базы."""
+    user_id = message.from_user.id
+    logger.info(f"User {user_id} requested mystats")
+
+    try:
+        db = get_db_manager()
+        if not db:
+            await message.answer("⚠️ Статистика временно недоступна")
+            return
+
+        # Получаем данные из базы
+        import sqlite3
+        conn = sqlite3.connect(db.db_path)
+        cursor = conn.cursor()
+
+        # Всего загрузок
+        cursor.execute("SELECT COUNT(*) FROM download_history WHERE user_id = ?", (user_id,))
+        total_downloads = cursor.fetchone()[0]
+
+        if total_downloads == 0:
+            await message.answer(
+                "📊 <b>Моя статистика</b>\n\n"
+                "У вас пока нет загрузок.\n\n"
+                "💡 Отправьте ссылку на пост из Instagram, YouTube или TikTok!",
+                parse_mode="HTML"
+            )
+            conn.close()
+            return
+
+        # По платформам
+        cursor.execute("""
+            SELECT platform, COUNT(*) as count
+            FROM download_history
+            WHERE user_id = ?
+            GROUP BY platform
+            ORDER BY count DESC
+        """, (user_id,))
+        platforms = cursor.fetchall()
+
+        # Любимая платформа
+        favorite_platform = platforms[0] if platforms else ("Нет", 0)
+        favorite_percentage = (favorite_platform[1] / total_downloads * 100) if total_downloads > 0 else 0
+
+        # Скачано данных
+        cursor.execute("SELECT SUM(file_size) FROM download_history WHERE user_id = ?", (user_id,))
+        total_bytes = cursor.fetchone()[0] or 0
+        total_gb = total_bytes / (1024 * 1024 * 1024)
+
+        # Избранное
+        cursor.execute("SELECT COUNT(*) FROM download_history WHERE user_id = ? AND is_favorite = 1", (user_id,))
+        favorites = cursor.fetchone()[0]
+
+        # Коллекции
+        cursor.execute("SELECT COUNT(*) FROM collections WHERE user_id = ?", (user_id,))
+        collections = cursor.fetchone()[0]
+
+        # Активность по дням недели
+        cursor.execute("""
+            SELECT strftime('%w', download_date) as dow, COUNT(*) as count
+            FROM download_history
+            WHERE user_id = ?
+            GROUP BY dow
+            ORDER BY dow
+        """, (user_id,))
+        activity_by_dow = dict(cursor.fetchall())
+
+        # Последняя загрузка
+        cursor.execute("""
+            SELECT download_date, platform, title
+            FROM download_history
+            WHERE user_id = ?
+            ORDER BY download_date DESC
+            LIMIT 1
+        """, (user_id,))
+        last_download = cursor.fetchone()
+
+        conn.close()
+
+        # Форматируем платформы
+        platform_icons = {
+            "Instagram": "📸",
+            "YouTube": "📺",
+            "TikTok": "🎵",
+            "VK": "🎬",
+            "Twitter": "🐦"
+        }
+
+        platform_text = "\n".join([
+            f"  {platform_icons.get(p, '📁')} {p}: {c} ({c/total_downloads*100:.0f}%)"
+            for p, c in platforms[:5]
+        ])
+
+        # График активности по дням
+        days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+        max_count = max(activity_by_dow.values()) if activity_by_dow else 1
+
+        activity_graph = []
+        for i in range(7):
+            dow_str = str((i + 1) % 7)  # 0=Вс, 1=Пн, ..., 6=Сб
+            count = activity_by_dow.get(dow_str, 0)
+            bars = int(count / max_count * 10) if max_count > 0 else 0
+            bar_graph = "▓" * bars + "░" * (10 - bars)
+            activity_graph.append(f"{days[i]} {bar_graph} {count}")
+
+        activity_text = "\n".join(activity_graph)
+
+        # Последняя загрузка
+        last_text = "Нет данных"
+        if last_download:
+            try:
+                last_date = datetime.fromisoformat(last_download[0])
+                last_date_str = last_date.strftime("%d.%m.%Y %H:%M")
+                last_title = (last_download[2] or "Без названия")[:30]
+                last_text = f"{platform_icons.get(last_download[1], '📁')} {last_title}\n  {last_date_str}"
+            except:
+                last_text = "Недавно"
+
+        text = (
+            "📊 <b>Моя статистика</b>\n\n"
+
+            f"🎬 <b>Всего загрузок:</b> {total_downloads}\n"
+            f"📸 <b>Любимая платформа:</b> {favorite_platform[0]} ({favorite_percentage:.0f}%)\n"
+            f"💾 <b>Скачано данных:</b> {total_gb:.2f} GB\n"
+            f"⭐ <b>В избранном:</b> {favorites}\n"
+            f"📁 <b>Коллекций:</b> {collections}\n\n"
+
+            f"<b>📊 По платформам:</b>\n{platform_text}\n\n"
+
+            f"<b>📈 Активность по дням:</b>\n<code>{activity_text}</code>\n\n"
+
+            f"<b>⏱️ Последняя загрузка:</b>\n{last_text}"
+        )
+
+        await message.answer(text, parse_mode="HTML")
+
+    except Exception as e:
+        logger.error(f"Error in mystats: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка: {safe_format_error(e)}")
+
+
 @router.message(Command("stats"))
 async def stats_command(message: types.Message) -> None:
     """Показать статистику пользователя."""
@@ -653,22 +795,122 @@ async def allstats_command(message: types.Message) -> None:
 
         stats = await loop.run_in_executor(None, get_stats)
 
+        # Получаем данные из базы
+        db_stats = {}
+        db = get_db_manager()
+        if db:
+            # Общее количество загрузок в базе
+            conn = db.db_path
+            import sqlite3
+            db_conn = sqlite3.connect(conn)
+            cursor = db_conn.cursor()
+
+            # Всего загрузок
+            cursor.execute("SELECT COUNT(*) FROM download_history")
+            total_downloads = cursor.fetchone()[0]
+
+            # По платформам
+            cursor.execute("""
+                SELECT platform, COUNT(*) as count
+                FROM download_history
+                GROUP BY platform
+                ORDER BY count DESC
+            """)
+            db_platforms = dict(cursor.fetchall())
+
+            # Избранное
+            cursor.execute("SELECT COUNT(*) FROM download_history WHERE is_favorite = 1")
+            favorites_count = cursor.fetchone()[0]
+
+            # Коллекции
+            cursor.execute("SELECT COUNT(*) FROM collections")
+            collections_count = cursor.fetchone()[0]
+
+            # Настройки пользователей
+            cursor.execute("SELECT COUNT(*) FROM user_settings")
+            users_with_settings = cursor.fetchone()[0]
+
+            # Популярные качества
+            cursor.execute("""
+                SELECT default_quality, COUNT(*) as count
+                FROM user_settings
+                GROUP BY default_quality
+                ORDER BY count DESC
+                LIMIT 3
+            """)
+            popular_qualities = cursor.fetchall()
+
+            db_conn.close()
+
+            db_stats = {
+                "total_downloads": total_downloads,
+                "platforms": db_platforms,
+                "favorites": favorites_count,
+                "collections": collections_count,
+                "users_with_settings": users_with_settings,
+                "popular_qualities": popular_qualities
+            }
+
         success_rate = (stats["successful"] / stats["total_requests"] * 100) if stats["total_requests"] > 0 else 0
 
-        # Format platforms
+        # Format platforms from Google Sheets
         platform_text = "\n".join([
-            f"  • {p}: {c}" for p, c in sorted(stats["platforms"].items(), key=lambda x: -x[1])
+            f"  • {p}: {c}" for p, c in sorted(stats["platforms"].items(), key=lambda x: -x[1])[:5]
         ]) or "  Нет данных"
 
+        # Format DB platforms
+        db_platform_text = ""
+        if db_stats and db_stats.get("platforms"):
+            db_platform_text = "\n".join([
+                f"  • {p}: {c}" for p, c in list(db_stats["platforms"].items())[:5]
+            ])
+
+        # Format qualities
+        quality_text = ""
+        if db_stats and db_stats.get("popular_qualities"):
+            quality_text = ", ".join([
+                f"{q[0]} ({q[1]})" for q in db_stats["popular_qualities"]
+            ])
+
         text = (
-            "📈 <b>Общая статистика</b>\n\n"
-            f"👥 <b>Пользователи:</b> {stats['total_users']}\n"
-            f"  ⭐ Premium: {stats['premium_users']}\n\n"
-            f"📥 <b>Запросы:</b> {stats['total_requests']}\n"
+            "📈 <b>Общая статистика бота</b>\n\n"
+
+            "<b>👥 Пользователи:</b>\n"
+            f"  Всего: {stats['total_users']}\n"
+            f"  ⭐ Premium: {stats['premium_users']}\n"
+            f"  ⚙️ С настройками: {db_stats.get('users_with_settings', 0)}\n\n"
+
+            "<b>📥 Запросы (Google Sheets):</b>\n"
+            f"  Всего: {stats['total_requests']}\n"
             f"  ✅ Успешных: {stats['successful']} ({success_rate:.1f}%)\n"
             f"  ❌ Ошибок: {stats['total_requests'] - stats['successful']}\n\n"
-            f"📊 <b>По платформам:</b>\n{platform_text}"
+
+            "<b>📊 Платформы (Sheets):</b>\n"
+            f"{platform_text}\n\n"
         )
+
+        if db_stats:
+            text += (
+                "<b>💾 База данных:</b>\n"
+                f"  📂 Загрузок в истории: {db_stats.get('total_downloads', 0)}\n"
+                f"  ⭐ В избранном: {db_stats.get('favorites', 0)}\n"
+                f"  📁 Коллекций: {db_stats.get('collections', 0)}\n\n"
+            )
+
+            if db_platform_text:
+                text += f"<b>📊 Платформы (DB):</b>\n{db_platform_text}\n\n"
+
+            if quality_text:
+                text += f"<b>🎬 Популярные качества:</b>\n  {quality_text}\n\n"
+
+        # Добавляем rate limiter stats
+        rl_stats = rate_limiter.get_stats()
+        total_rl_requests = sum(s['request_count'] for s in rl_stats.values())
+        if total_rl_requests > 0:
+            text += (
+                f"<b>⏱️ Rate Limiter:</b>\n"
+                f"  Запросов: {total_rl_requests}\n"
+            )
 
         await message.answer(text, parse_mode="HTML")
 
