@@ -153,16 +153,18 @@ class MediaDownloader:
                 "duration": info.get("duration", 0),
             }
 
-            # Собираем доступные качества
+            # Собираем доступные качества (mp4 и webm)
             for fmt in formats:
                 height = fmt.get("height")
-                if height and fmt.get("ext") == "mp4":
+                ext = fmt.get("ext", "")
+                vcodec = fmt.get("vcodec", "none")
+                if height and vcodec != "none" and ext in ("mp4", "webm"):
                     if height in [360, 480, 720, 1080]:
                         if height not in result:
                             result[height] = {
                                 "format_id": fmt.get("format_id"),
                                 "filesize": fmt.get("filesize") or fmt.get("filesize_approx", 0),
-                                "ext": fmt.get("ext"),
+                                "ext": ext,
                             }
 
             return result
@@ -182,13 +184,23 @@ class MediaDownloader:
             output_dir = self.DOWNLOAD_DIRS["video"]
             output_template = str(output_dir / f"%(id)s_{quality}p.%(ext)s")
 
-            format_str = f"best[height<={quality}][ext=mp4]/best[height<={quality}]/best"
+            # Сначала пробуем mp4, потом merge видео+аудио через ffmpeg, потом best
+            format_str = (
+                f"bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]"
+                f"/bestvideo[height<={quality}]+bestaudio"
+                f"/best[height<={quality}]"
+                f"/best"
+            )
 
             ydl_opts = {
                 **self.YDL_OPTS_BASE,
                 "format": format_str,
                 "outtmpl": output_template,
-                "postprocessors": [],
+                "merge_output_format": "mp4",
+                "postprocessors": [{
+                    "key": "FFmpegVideoConvertor",
+                    "preferedformat": "mp4",
+                }],
             }
 
             loop = asyncio.get_event_loop()
@@ -204,7 +216,10 @@ class MediaDownloader:
 
             # Найти скачанный файл
             video_id = info.get("id", "unknown")
-            possible_files = list(output_dir.glob(f"{video_id}_{quality}p.*"))
+            possible_files = list(output_dir.glob(f"{video_id}_{quality}p.mp4"))
+
+            if not possible_files:
+                possible_files = list(output_dir.glob(f"{video_id}_{quality}p.*"))
 
             if not possible_files:
                 possible_files = list(output_dir.glob(f"{video_id}*"))

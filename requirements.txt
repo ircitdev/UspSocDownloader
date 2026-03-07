@@ -4,7 +4,7 @@ aiohttp==3.11.11
 aiofiles==24.1.0
 
 # Downloaders
-yt-dlp==2024.12.13
+yt-dlp
 
 # Core
 python-dotenv==1.0.1
