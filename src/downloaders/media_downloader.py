@@ -197,6 +197,7 @@ class MediaDownloader:
                 "format": format_str,
                 "outtmpl": output_template,
                 "merge_output_format": "mp4",
+                "ffmpeg_location": "/usr/bin",
                 "postprocessors": [{
                     "key": "FFmpegVideoConvertor",
                     "preferedformat": "mp4",
