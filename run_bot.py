@@ -1,5 +1,7 @@
 """Main application module - Bot entry point."""
 import asyncio
+import subprocess
+import sys
 import logging
 from src.utils.logger import get_logger
 from src.bot import create_bot, close_bot
@@ -15,10 +17,38 @@ from src.utils.file_cleaner import init_cleanup_service
 logger = get_logger(__name__)
 
 
+def update_ytdlp() -> None:
+    """Update yt-dlp to the latest version."""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-U", "yt-dlp", "--quiet"],
+            capture_output=True, text=True, timeout=120
+        )
+        if result.returncode == 0:
+            import yt_dlp
+            logger.info(f"yt-dlp updated: {yt_dlp.version.__version__}")
+        else:
+            logger.warning(f"yt-dlp update failed: {result.stderr[:200]}")
+    except Exception as e:
+        logger.warning(f"yt-dlp auto-update error: {e}")
+
+
+async def auto_update_ytdlp_loop() -> None:
+    """Check and update yt-dlp every 24 hours."""
+    while True:
+        await asyncio.sleep(24 * 60 * 60)
+        logger.info("Running scheduled yt-dlp update...")
+        await asyncio.get_event_loop().run_in_executor(None, update_ytdlp)
+
+
 async def main():
     """Main async function - starts the bot."""
     logger.info(f"Starting {config.APP_NAME}")
     logger.debug(f"Debug mode: {config.DEBUG}")
+
+    # Update yt-dlp at startup
+    logger.info("Checking yt-dlp version...")
+    await asyncio.get_event_loop().run_in_executor(None, update_ytdlp)
 
     bot = None
     try:
@@ -75,6 +105,9 @@ async def main():
                 logger.info("Periodic cleanup completed")
         
         cleanup_task = asyncio.create_task(periodic_cleanup())
+
+        # Start background yt-dlp auto-update (every 24h)
+        asyncio.create_task(auto_update_ytdlp_loop())
 
         logger.info("Starting bot polling...")
         await dp.start_polling(bot)
