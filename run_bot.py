@@ -33,12 +33,31 @@ def update_ytdlp() -> None:
         logger.warning(f"yt-dlp auto-update error: {e}")
 
 
-async def auto_update_ytdlp_loop() -> None:
+async def auto_update_ytdlp_loop(bot=None) -> None:
     """Check and update yt-dlp every 24 hours."""
     while True:
         await asyncio.sleep(24 * 60 * 60)
         logger.info("Running scheduled yt-dlp update...")
+        try:
+            import importlib
+            _ytv = importlib.import_module("yt_dlp.version")
+            old_version = _ytv.__version__
+        except Exception:
+            old_version = None
         await asyncio.get_event_loop().run_in_executor(None, update_ytdlp)
+        if bot:
+            try:
+                import importlib
+                _ytv2 = importlib.import_module("yt_dlp.version")
+                importlib.reload(_ytv2)
+                new_version = _ytv2.__version__
+                if old_version and old_version != new_version:
+                    msg = f"🔄 <b>yt-dlp обновлён</b>\n\n{old_version} → <b>{new_version}</b>"
+                else:
+                    msg = f"✅ <b>yt-dlp актуален</b>: {new_version}"
+                await bot.send_message(chat_id=config.ADMIN_ID, text=msg, parse_mode="HTML")
+            except Exception as e:
+                logger.warning(f"Failed to notify admin about yt-dlp update: {e}")
 
 
 async def main():
@@ -107,7 +126,23 @@ async def main():
         cleanup_task = asyncio.create_task(periodic_cleanup())
 
         # Start background yt-dlp auto-update (every 24h)
-        asyncio.create_task(auto_update_ytdlp_loop())
+        asyncio.create_task(auto_update_ytdlp_loop(bot))
+
+        # Notify admin about bot startup
+        try:
+            import importlib
+            _ytv = importlib.import_module("yt_dlp.version")
+            ytdlp_ver = _ytv.__version__
+        except Exception:
+            ytdlp_ver = "unknown"
+        try:
+            await bot.send_message(
+                chat_id=config.ADMIN_ID,
+                text=f"🚀 <b>{config.APP_NAME} запущен</b>\n\n🔧 yt-dlp: {ytdlp_ver}",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to notify admin about startup: {e}")
 
         logger.info("Starting bot polling...")
         await dp.start_polling(bot)
